@@ -26,7 +26,8 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "deepagents>=0.4",
+    "langchain-core>=0.3",
+    "langgraph>=0.2",
     "sqlalchemy>=2.0",
     "click>=8.0",
     "rich>=13.0",

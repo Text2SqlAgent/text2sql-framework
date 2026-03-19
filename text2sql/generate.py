@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from deepagents import create_deep_agent
+from text2sql.agent import create_deep_agent
 
 from text2sql.connection import Database
 from text2sql.dialects import get_dialect_guide
