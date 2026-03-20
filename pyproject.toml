@@ -45,8 +45,8 @@ dev = ["pytest>=7.0"]
 text2sql = "text2sql.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/cooperpenniman/text2sql"
-Repository = "https://github.com/cooperpenniman/text2sql"
+Homepage = "https://github.com/cpenniman12/text2sql-framework"
+Repository = "https://github.com/cpenniman12/text2sql-framework"
 
 [tool.hatch.build.targets.wheel]
 packages = ["text2sql"]
