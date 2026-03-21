@@ -16,9 +16,10 @@ print(result.data)  # [{'name': 'Acme Corp', 'total': 14302.50}, ...]
 
 ## How it works
 
-The text2sql SDK takes full advantage of LLMs' ability to make many tool calls and work in a loop. This architecture lets the agent take as many steps as it needs — more tool calls for harder questions, fewer for simple ones. Here is the current architecture:
+The text2sql SDK takes full advantage of LLMs' ability to make many tool calls and work in a loop. This architecture lets the agent take as many steps as it needs — more tool calls for harder questions, fewer for simple ones. Here is the current architecture. Access to an execute_sql tool enables the LLM to ensure accuracey before returning the result to the user.
 
 ```
+A typical flow might be:
 User: "What's our revenue by product category?"
                     │
                     ▼
@@ -28,14 +29,14 @@ User: "What's our revenue by product category?"
         └────────┬────────────┘
                  │
      ┌───────────▼────────────┐
-     │  1. EXPLORE            │  ← queries information_schema / PRAGMA / sys.tables
-     │  List all tables       │    to discover what's available
+     │  1. EXPLORE            │  ← queries information_schema 
+     │  List all tables
      └───────────┬────────────┘
                  │
      ┌───────────▼────────────┐
      │  2. LOOKUP EXAMPLES    │  ← calls lookup_example("revenue by category")
      │  Check for business    │    gets guidance: which tables, columns, joins
-     │  context (optional)    │    to use for this concept
+     │  context (when applicable)      to use for this concept
      └───────────┬────────────┘
                  │
      ┌───────────▼────────────┐
@@ -62,13 +63,7 @@ User: "What's our revenue by product category?"
 
 The agent sees the actual query results at every step. If it writes a query and the output doesn't look right — empty results, unexpected columns, numbers that don't make sense — it goes back to the schema, tries different tables or joins, and re-executes. This self-correction loop runs until the agent is confident the results answer the question.
 
-This is fundamentally different from one-shot RAG, where there's no feedback loop at all. The agent self-corrects at the **retrieval** stage (picked the wrong table? go find the right one), at the **SQL** stage (syntax error? read it and fix), and at the **results** stage (output doesn't match the question? rethink the approach). This is the same architecture used internally at Fidelity, Salesforce, and OpenAI for their production text-to-SQL systems.
-
-### Why this architecture wins
-
-**One-shot RAG fails silently.** If the retriever picks the wrong table, the LLM confidently generates SQL against it. You get a syntactically valid query that returns the wrong answer. There's no feedback loop.
-
-**Agentic retrieval fails loudly.** When the agent picks the wrong table, it executes the query, sees the error or unexpected results, and corrects course. It has the same tools a human analyst would use — browse tables, check columns, test queries, iterate.
+This is fundamentally different from many other text2sql frameworks, where there's no feedback loop at all. The agent self-corrects at the **retrieval** stage (picked the wrong table? go find the right one), at the **SQL** stage (syntax error? read it and fix), and at the **results** stage (output doesn't match the question? rethink the approach).
 
 This matters most on real-world schemas:
 - **50+ tables** where most are irrelevant to any given question
@@ -129,50 +124,9 @@ TextSQL("snowflake://user:pass@account/db/schema")
 
 The agent automatically detects the SQL dialect and adjusts its schema exploration strategy — `information_schema` for PostgreSQL/MySQL/Snowflake, `PRAGMA` for SQLite, `sys.tables` for SQL Server.
 
-## Example scenarios
 
-Real databases have jargon, business logic, and naming conventions that no LLM can guess. The `examples` parameter lets you teach the agent your domain:
+The agent gets a `lookup_example` tool. An example might be a query where you anticipate your agent to fail. For example, if you company always adjusts revenue to local currency, you might include an example called 'calculating revenue' which the LLM would call for any revenue question. When the LLM calls `lookup_example("net revenue") itll be returned an MD file explaining the correct methodology for adjusting revenue.
 
-```markdown
-<!-- scenarios.md -->
-
-## net revenue
-Net revenue = gross revenue minus refunds.
-- `orders.amt_ttl` is the gross order total
-- Refunds are in the `payments` table where `is_refund = 1`
-- Net = SUM(orders.amt_ttl) + SUM(payments.amt) WHERE is_refund = 1
-  (refund amounts are stored as negative values)
-
-## active customers
-A customer is "active" if they placed at least one non-cancelled order
-in the last 12 months.
-```sql
-SELECT DISTINCT cust_id FROM orders
-WHERE order_date >= DATE('now', '-12 months')
-  AND status != 'cancelled'
-```
-
-## customer home address
-Customer addresses are in `customer_addresses`, NOT on the `customers` table.
-- Join on `customers.cust_id = customer_addresses.cust_id`
-- Filter: `addr_type = 'billing'` for billing, `addr_type = 'shipping'` for shipping
-- `is_default = 1` for the primary address
-```
-
-```python
-engine = TextSQL(
-    "postgresql://localhost/mydb",
-    examples="scenarios.md",
-)
-```
-
-The agent gets a `lookup_example` tool. When a question involves a business concept like "net revenue" or "active customers," the agent calls `lookup_example("net revenue")` and gets your guidance before writing SQL.
-
-### Why examples, not fine-tuning
-
-Fine-tuning bakes knowledge into model weights. When your schema changes, you retrain. When you add a table, you retrain. When a column gets renamed, you retrain.
-
-Examples are a markdown file. Edit it, and the next query uses the updated guidance. No training pipeline, no GPU costs, no deployment. An analyst who knows the schema can write an example in 2 minutes that fixes a class of failures.
 
 ## Custom instructions
 
@@ -212,14 +166,9 @@ print(engine.trace_summary())
 # }
 ```
 
-## text2sql Dashboard (paid)
+## Circular - The text2sql Agent Tracing Platform (Coming soon!)
 
-Writing examples and instructions by hand works, but how do you know *which* examples to write? The [text2sql Dashboard](https://text2sql-dashboard.vercel.app) reads your agent traces, identifies where your LLM is struggling — wrong tables, bad joins, misunderstood business terms — and gives you specific fixes:
-
-- **Auto-populate examples**: the dashboard detects repeated failure patterns (e.g. "the agent keeps using `orders.amt_ttl` when the user asks about net revenue") and generates the exact `scenarios.md` entry to fix it
-- **Suggest instruction changes**: when a fix applies to all queries (e.g. "always exclude cancelled orders from revenue"), the dashboard recommends adding it to your global `instructions` instead of a one-off example
-- **Track accuracy over time**: see your success rate, error rate, and avg tool calls per query across deployments
-- **Run Evals**: 
+Writing examples and instructions by hand works, but how do you know *which* examples to write? and how do you ensure those edits are effective? The soon to be release agentic tracing platform understands that Text-to-SQL agents fail in specific, predictable ways — wrong columns, missing joins, misunderstood business logic. Generic observability platforms show you the trace, but they can't tell you why the SQL was wrong or how to fix it. Circular will analyze your traces with deep knowledge of how LLMs fail at SQL generation, then gives you specific edits to make your agent better. The platform reads your agent traces, identifies where your LLM is struggling — wrong tables, bad joins, misunderstood business terms — and gives you specific fixes. 
 
 ```python
 engine = TextSQL(
