@@ -166,7 +166,7 @@ engine = TextSQL(
 )
 ```
 
-The agent gets a `lookup_example` tool. When a question involves a business concept like "net revenue" or "active customers," the agent calls `lookup_example("net revenue")` and gets your guidance before writing SQL. This is how Fidelity improved accuracy from ~60% to 90%+ — curated examples that encode institutional knowledge about what columns mean and how tables join.
+The agent gets a `lookup_example` tool. When a question involves a business concept like "net revenue" or "active customers," the agent calls `lookup_example("net revenue")` and gets your guidance before writing SQL.
 
 ### Why examples, not fine-tuning
 
