@@ -1,16 +1,6 @@
 # text2sql
 
-Give any AI agent a way to talk to your relational databases.
-
-**text2sql** is a Python SDK that translates natural language into SQL using agentic schema retrieval. The agent explores your database schema on its own — searching tables, inspecting columns, testing queries — then returns verified SQL and results. The core functionality is: 
-1) agent recieves natural language request
-2) agent uses database info schema to explore
-3) agent uses execute sql tool to confirm validity of query before returning it to the user
-
-This SDK enables you to get set up an agent who can execute on the loop described above. There are some an additional (optional) tool for giving your agent sample queries, if the above loop falls short.
-
-## Why this architecture? 
-This architecture only recently became possible as LLMs have begun to excel at tool calling. Many text to sql architectures such as WrenAI and Vanna still dont take advantage of this capability. 
+In the past few months we've seen LLMs massively improve at tool calling. This text to sql architecture takes full advangtage of that new capability by giving the LLM maximum flexability to pull in the context it needs. The architecture is very simple - you just give the LLM access to an execute sql tool so that it can explore the data schema and then test queries in a loop before returing the final answer. 
 
 Compatibility/Install
 Works with any SQL database (PostgreSQL, MySQL, SQLite, SQL Server, Snowflake, BigQuery) and any LLM provider.
