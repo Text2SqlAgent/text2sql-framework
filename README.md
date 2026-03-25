@@ -2,7 +2,18 @@
 
 Give any AI agent a way to talk to your relational databases.
 
-**text2sql** is a Python SDK that translates natural language into SQL using agentic schema retrieval. The agent explores your database schema on its own — searching tables, inspecting columns, testing queries — then returns verified SQL and results. Works with any SQL database (PostgreSQL, MySQL, SQLite, SQL Server, Snowflake, BigQuery) and any LLM provider.
+**text2sql** is a Python SDK that translates natural language into SQL using agentic schema retrieval. The agent explores your database schema on its own — searching tables, inspecting columns, testing queries — then returns verified SQL and results. The core functionality is: 
+1) agent recieves natural language request
+2) agent uses database info schema to explore
+3) agent uses execute sql tool to confirm validity of query before returning it to the user
+
+This SDK enables you to get set up an agent who can execute on the loop described above. There are some an additional (optional) tool for giving your agent sample queries, if the above loop falls short.
+
+## Why this architecture? 
+This architecture only recently became possible as LLMs have begun to excel at tool calling. Many text to sql architectures such as WrenAI and Vanna still dont take advantage of this capability. 
+
+
+Works with any SQL database (PostgreSQL, MySQL, SQLite, SQL Server, Snowflake, BigQuery) and any LLM provider.
 
 ```python
 from text2sql import TextSQL
@@ -13,63 +24,9 @@ result = engine.ask("Which customers have spent more than $10K this year?")
 print(result.sql)   # verified SQL
 print(result.data)  # [{'name': 'Acme Corp', 'total': 14302.50}, ...]
 ```
+ 
+               
 
-## How it works
-
-The text2sql SDK takes full advantage of LLMs' ability to make many tool calls and work in a loop. This architecture lets the agent take as many steps as it needs — more tool calls for harder questions, fewer for simple ones. Here is the current architecture. Access to an execute_sql tool enables the LLM to ensure accuracey before returning the result to the user.
-
-```
-A typical flow might be:
-User: "What's our revenue by product category?"
-                    │
-                    ▼
-        ┌─────────────────────┐
-        │   Agent receives    │
-        │     question        │
-        └────────┬────────────┘
-                 │
-     ┌───────────▼────────────┐
-     │  1. EXPLORE            │  ← queries information_schema 
-     │  List all tables
-     └───────────┬────────────┘
-                 │
-     ┌───────────▼────────────┐
-     │  2. LOOKUP EXAMPLES    │  ← calls lookup_example("revenue by category")
-     │  Check for business    │    gets guidance: which tables, columns, joins
-     │  context (when applicable)      to use for this concept
-     └───────────┬────────────┘
-                 │
-     ┌───────────▼────────────┐
-     │  3. INSPECT            │  ← PRAGMA table_info('order_items')
-     │  Check column names,   │    sees: item_id, order_id, prod_id, qty,
-     │  types, keys           │    unit_px_at_sale, discount_pct, line_total
-     └───────────┬────────────┘
-                 │
-     ┌───────────▼────────────┐
-     │  4. WRITE & EXECUTE    │  ← runs the SQL, sees the actual results
-     │  Test the query        │
-     │                        │    ┌─ SQL error? read the error, fix, retry
-     │                        │    ├─ Wrong columns? go back to schema
-     │                        │    ├─ Results look off? try a different table
-     │                        │    └─ Results make sense? done
-     └───────────┬────────────┘
-                 │ (loop until satisfied)
-                 │
-     ┌───────────▼────────────┐
-     │  5. RETURN              │  ← final verified SQL sent back
-     │  Verified SQL           │    middleware re-executes with your row limit
-     └────────────────────────┘
-```
-
-The agent sees the actual query results at every step. If it writes a query and the output doesn't look right — empty results, unexpected columns, numbers that don't make sense — it goes back to the schema, tries different tables or joins, and re-executes. This self-correction loop runs until the agent is confident the results answer the question.
-
-This is fundamentally different from many other text2sql frameworks, where there's no feedback loop at all. The agent self-corrects at the **retrieval** stage (picked the wrong table? go find the right one), at the **SQL** stage (syntax error? read it and fix), and at the **results** stage (output doesn't match the question? rethink the approach).
-
-This matters most on real-world schemas:
-- **50+ tables** where most are irrelevant to any given question
-- **Cryptic column names** (`amt_ttl`, `qty_oh`, `unit_px`) that need exploration to understand
-- **Multiple valid sources** for the same concept (revenue in `orders`, `payments`, reporting tables)
-- **Missing or inconsistent FK naming** (`customer_id` in one table, `cust_id` in another)
 
 ## Install
 
@@ -125,7 +82,7 @@ TextSQL("snowflake://user:pass@account/db/schema")
 The agent automatically detects the SQL dialect and adjusts its schema exploration strategy — `information_schema` for PostgreSQL/MySQL/Snowflake, `PRAGMA` for SQLite, `sys.tables` for SQL Server.
 
 
-The agent gets a `lookup_example` tool. An example might be a query where you anticipate your agent to fail. For example, if you company always adjusts revenue to local currency, you might include an example called 'calculating revenue' which the LLM would call for any revenue question. When the LLM calls `lookup_example("net revenue") itll be returned an MD file explaining the correct methodology for adjusting revenue.
+Optional: The agent gets a `lookup_example` tool. An example might be a query where you anticipate your agent to fail. For example, if you company always adjusts revenue to local currency, you might include an example called 'calculating revenue' which the LLM would call for any revenue question. When the LLM calls `lookup_example("net revenue") itll be returned an MD file explaining the correct methodology for adjusting revenue.
 
 
 ## Custom instructions
