@@ -12,7 +12,7 @@ This SDK enables you to get set up an agent who can execute on the loop describe
 ## Why this architecture? 
 This architecture only recently became possible as LLMs have begun to excel at tool calling. Many text to sql architectures such as WrenAI and Vanna still dont take advantage of this capability. 
 
-
+Compatibility/Install
 Works with any SQL database (PostgreSQL, MySQL, SQLite, SQL Server, Snowflake, BigQuery) and any LLM provider.
 
 ```python
