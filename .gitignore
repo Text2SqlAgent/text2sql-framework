@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+
+# Environment / secrets
+.env
+.env.local
+.env*.local
+
+# Databases
+*.db
+*.sqlite
+
+# Python tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Traces
+*.traces.jsonl
+traces/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node / Next.js
+node_modules/
+.next/
+next-env.d.ts
+*.tsbuildinfo
+
+# Claude Code
+.claude/
+
+# Playwright
+.playwright-mcp/
+
+# Scratch / dev files
+test_hard*.py
+test_e2e.py
+expand_schema*.py
+seed_db.py
+upload_traces.py
+eval_set.csv
+traces_v*.jsonl
+substack_draft.md
+deepagents/
+=*
