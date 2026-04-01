@@ -16,41 +16,50 @@ print(result.data)  # [{'name': 'Acme Corp', 'total': 14302.50}, ...]
 
 To demonstrate how this architecture works, ive pasted in an agent trace below: 
 
-⏺ Question: "For the client whose loan was approved first on 1993/7/5,                                                  
-             what is the balance increase rate from 1993/3/22 to 1998/12/27?"
-                                                                                                                        
-  ─────────────────────────────────────────────────────────────                                                         
-  Tool:   execute_sql                                                                                                   
-  Input:  SELECT name FROM sqlite_master                                                                                
-          WHERE type='table' AND name NOT LIKE 'sqlite_%'                                                               
-  Output: account, card, client, disp, district, loan, order, trans
-  ─────────────────────────────────────────────────────────────                                                         
-  Tool:   execute_sql                                                                                                   
-  Input:  SELECT sql FROM sqlite_master
-          WHERE type='table' AND name IN ('loan', 'trans', 'disp')                                                      
-  Output: loan(loan_id, account_id, date, amount, duration ...)   
-          trans(trans_id, account_id, date, type, balance ...)                                                          
-          disp(disp_id, client_id, account_id, type ...)
-  ─────────────────────────────────────────────────────────────                                                         
-  Tool:   execute_sql                                             
-  Input:  SELECT loan_id, account_id FROM loan                                                                          
-          WHERE date = '1993-07-05' ORDER BY loan_id LIMIT 1                                                            
-  Output: loan_id=5314  account_id=1787
-  ─────────────────────────────────────────────────────────────                                                         
-  Tool:   execute_sql                                                                                                   
-  Input:  SELECT balance FROM trans
-          WHERE account_id = 1787 AND date = '1993-03-22'                                                               
-  Output: balance=1100                                            
-  ─────────────────────────────────────────────────────────────
-  Tool:   execute_sql                                                                                                   
-  Input:  SELECT balance FROM trans
-          WHERE account_id = 1787 AND date = '1998-12-27'                                                               
-  Output: balance=5835                                            
-  ─────────────────────────────────────────────────────────────
-  Tool:   execute_sql                                                                                                   
-  Input:  WITH first_loan AS (...), balance_start AS (...), balance_end AS (...)
-          SELECT ROUND((end - start) / start * 100, 2) AS increase_rate                                                 
-  Output: increase_rate = 430.45%  ✓   
+```
+Question: "For the client whose loan was approved first on 1993/7/5,
+           what is the balance increase rate from 1993/3/22 to 1998/12/27?"
+
+┌─────────────────────────────────────────────────────────────┐
+│ Tool:   execute_sql                                         │
+│ Input:  SELECT name FROM sqlite_master                      │
+│         WHERE type='table' AND name NOT LIKE 'sqlite_%'     │
+│ Output: account, card, client, disp, district, loan,        │
+│         order, trans                                        │
+├─────────────────────────────────────────────────────────────┤
+│ Tool:   execute_sql                                         │
+│ Input:  SELECT sql FROM sqlite_master                       │
+│         WHERE type='table'                                  │
+│           AND name IN ('loan', 'trans', 'disp')             │
+│ Output: loan(loan_id, account_id, date, amount, duration…)  │
+│         trans(trans_id, account_id, date, type, balance…)    │
+│         disp(disp_id, client_id, account_id, type…)         │
+├─────────────────────────────────────────────────────────────┤
+│ Tool:   execute_sql                                         │
+│ Input:  SELECT loan_id, account_id FROM loan                │
+│         WHERE date = '1993-07-05'                           │
+│         ORDER BY loan_id LIMIT 1                            │
+│ Output: loan_id=5314  account_id=1787                       │
+├─────────────────────────────────────────────────────────────┤
+│ Tool:   execute_sql                                         │
+│ Input:  SELECT balance FROM trans                           │
+│         WHERE account_id = 1787 AND date = '1993-03-22'     │
+│ Output: balance = 1100                                      │
+├─────────────────────────────────────────────────────────────┤
+│ Tool:   execute_sql                                         │
+│ Input:  SELECT balance FROM trans                           │
+│         WHERE account_id = 1787 AND date = '1998-12-27'     │
+│ Output: balance = 5835                                      │
+├─────────────────────────────────────────────────────────────┤
+│ Tool:   execute_sql                                         │
+│ Input:  WITH first_loan AS (…),                             │
+│              balance_start AS (…),                          │
+│              balance_end AS (…)                             │
+│         SELECT ROUND((end - start) / start * 100, 2)        │
+│           AS increase_rate                                  │
+│ Output: increase_rate = 430.45%  ✓                          │
+└─────────────────────────────────────────────────────────────┘
+```
 
 
 The agent sees the actual query results at every step. If it writes a query and the output doesn't look right — empty results, unexpected columns, numbers that don't make sense — it goes back to the schema, tries different tables or joins, and re-executes. This self-correction loop runs until the agent is confident the results answer the question.
