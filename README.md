@@ -2,9 +2,6 @@
 
 In the past few months we've seen LLMs massively improve at tool calling. This text to sql architecture takes full advangtage of that new capability by giving the LLM maximum flexability to pull in the context it needs. The architecture is very simple - you just give the LLM access to an execute sql tool so that it can explore the data schema and then test queries in a loop before returing the final answer. 
 
-Compatibility/Install
-Works with any SQL database (PostgreSQL, MySQL, SQLite, SQL Server, Snowflake, BigQuery) and any LLM provider.
-
 ```python
 from text2sql import TextSQL
 
@@ -14,9 +11,60 @@ result = engine.ask("Which customers have spent more than $10K this year?")
 print(result.sql)   # verified SQL
 print(result.data)  # [{'name': 'Acme Corp', 'total': 14302.50}, ...]
 ```
- 
-               
 
+## How it works
+
+To demonstrate how this architecture works, ive pasted in an agent trace below: 
+
+⏺ Question: "For the client whose loan was approved first on 1993/7/5,                                                  
+             what is the balance increase rate from 1993/3/22 to 1998/12/27?"
+                                                                                                                        
+  ─────────────────────────────────────────────────────────────                                                         
+  Tool:   execute_sql                                                                                                   
+  Input:  SELECT name FROM sqlite_master                                                                                
+          WHERE type='table' AND name NOT LIKE 'sqlite_%'                                                               
+  Output: account, card, client, disp, district, loan, order, trans
+  ─────────────────────────────────────────────────────────────                                                         
+  Tool:   execute_sql                                                                                                   
+  Input:  SELECT sql FROM sqlite_master
+          WHERE type='table' AND name IN ('loan', 'trans', 'disp')                                                      
+  Output: loan(loan_id, account_id, date, amount, duration ...)   
+          trans(trans_id, account_id, date, type, balance ...)                                                          
+          disp(disp_id, client_id, account_id, type ...)
+  ─────────────────────────────────────────────────────────────                                                         
+  Tool:   execute_sql                                             
+  Input:  SELECT loan_id, account_id FROM loan                                                                          
+          WHERE date = '1993-07-05' ORDER BY loan_id LIMIT 1                                                            
+  Output: loan_id=5314  account_id=1787
+  ─────────────────────────────────────────────────────────────                                                         
+  Tool:   execute_sql                                                                                                   
+  Input:  SELECT balance FROM trans
+          WHERE account_id = 1787 AND date = '1993-03-22'                                                               
+  Output: balance=1100                                            
+  ─────────────────────────────────────────────────────────────
+  Tool:   execute_sql                                                                                                   
+  Input:  SELECT balance FROM trans
+          WHERE account_id = 1787 AND date = '1998-12-27'                                                               
+  Output: balance=5835                                            
+  ─────────────────────────────────────────────────────────────
+  Tool:   execute_sql                                                                                                   
+  Input:  WITH first_loan AS (...), balance_start AS (...), balance_end AS (...)
+          SELECT ROUND((end - start) / start * 100, 2) AS increase_rate                                                 
+  Output: increase_rate = 430.45%  ✓   
+
+
+The agent sees the actual query results at every step. If it writes a query and the output doesn't look right — empty results, unexpected columns, numbers that don't make sense — it goes back to the schema, tries different tables or joins, and re-executes. This self-correction loop runs until the agent is confident the results answer the question.
+
+This is fundamentally different from one-shot RAG, where there's no feedback loop at all. The agent self-corrects at the **retrieval** stage (picked the wrong table? go find the right one), at the **SQL** stage (syntax error? read it and fix), and at the **results** stage (output doesn't match the question? rethink the approach).
+
+
+## Benchmarks
+
+Tested on the [BIRD financial benchmark](https://bird-bench.github.io/) — 8 questions (6 challenging, 2 moderate) against a real Czech banking schema with 8 tables.
+
+**6/8 on the first run. 8/8 after one round of trace-driven improvements.**
+
+→ [Full benchmark results and traces](bird_financial_benchmark.md)
 
 ## Install
 
@@ -71,9 +119,50 @@ TextSQL("snowflake://user:pass@account/db/schema")
 
 The agent automatically detects the SQL dialect and adjusts its schema exploration strategy — `information_schema` for PostgreSQL/MySQL/Snowflake, `PRAGMA` for SQLite, `sys.tables` for SQL Server.
 
+## Example scenarios (optional)
 
-Optional: The agent gets a `lookup_example` tool. An example might be a query where you anticipate your agent to fail. For example, if you company always adjusts revenue to local currency, you might include an example called 'calculating revenue' which the LLM would call for any revenue question. When the LLM calls `lookup_example("net revenue") itll be returned an MD file explaining the correct methodology for adjusting revenue.
+Real databases have jargon, business logic, and naming conventions that no LLM can guess. The `examples` parameter lets you teach the agent your domain:
 
+```markdown
+<!-- scenarios.md -->
+
+## net revenue
+Net revenue = gross revenue minus refunds.
+- `orders.amt_ttl` is the gross order total
+- Refunds are in the `payments` table where `is_refund = 1`
+- Net = SUM(orders.amt_ttl) + SUM(payments.amt) WHERE is_refund = 1
+  (refund amounts are stored as negative values)
+
+## active customers
+A customer is "active" if they placed at least one non-cancelled order
+in the last 12 months.
+```sql
+SELECT DISTINCT cust_id FROM orders
+WHERE order_date >= DATE('now', '-12 months')
+  AND status != 'cancelled'
+```
+
+## customer home address
+Customer addresses are in `customer_addresses`, NOT on the `customers` table.
+- Join on `customers.cust_id = customer_addresses.cust_id`
+- Filter: `addr_type = 'billing'` for billing, `addr_type = 'shipping'` for shipping
+- `is_default = 1` for the primary address
+```
+
+```python
+engine = TextSQL(
+    "postgresql://localhost/mydb",
+    examples="scenarios.md",
+)
+```
+
+The agent gets a `lookup_example` tool. When a question involves a business concept like "net revenue" or "active customers," the agent calls `lookup_example("net revenue")` and gets your guidance before writing SQL.
+
+### Why examples, not fine-tuning
+
+Fine-tuning bakes knowledge into model weights. When your schema changes, you retrain. When you add a table, you retrain. When a column gets renamed, you retrain.
+
+Examples are a markdown file. Edit it, and the next query uses the updated guidance. No training pipeline, no GPU costs, no deployment. An analyst who knows the schema can write an example in 2 minutes that fixes a class of failures.
 
 ## Custom instructions
 
@@ -113,18 +202,6 @@ print(engine.trace_summary())
 # }
 ```
 
-## Circular - The text2sql Agent Tracing Platform (Coming soon!)
-
-Writing examples and instructions by hand works, but how do you know *which* examples to write? and how do you ensure those edits are effective? The soon to be release agentic tracing platform understands that Text-to-SQL agents fail in specific, predictable ways — wrong columns, missing joins, misunderstood business logic. Generic observability platforms show you the trace, but they can't tell you why the SQL was wrong or how to fix it. Circular will analyze your traces with deep knowledge of how LLMs fail at SQL generation, then gives you specific edits to make your agent better. The platform reads your agent traces, identifies where your LLM is struggling — wrong tables, bad joins, misunderstood business terms — and gives you specific fixes. 
-
-```python
-engine = TextSQL(
-    "postgresql://localhost/mydb",
-    api_key="t2s_live_abc123...",  # enables auto-sync to dashboard
-)
-```
-
-Traces sync automatically in the background. Your data never leaves your database — only the agent's tool call metadata (which tables it searched, what SQL it tried, what errors it hit) is sent to the dashboard.
 
 ## CLI
 
