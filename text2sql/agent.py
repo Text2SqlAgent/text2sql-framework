@@ -1,18 +1,18 @@
-"""Deep Agent — wraps LangGraph's create_react_agent for agentic tool-calling loops.
+"""Deep Agent — wraps LangChain's Deep Agents harness for agentic tool-calling loops.
 
-Uses LangGraph's built-in agent infrastructure which handles:
-- Multi-turn tool calling loop
-- Message management
-- Configurable recursion limits
-- Context compaction when tool calls exceed 75k tokens
+Uses the deepagents package (langchain-ai/deepagents) with a minimal middleware
+stack: only summarization (context compaction) and Anthropic prompt caching.
+Filesystem, todo, and sub-agent middleware are disabled — this agent only needs
+the text2sql tools passed in by the caller.
 """
 
 from __future__ import annotations
 
-from langchain_core.messages import HumanMessage, SystemMessage, trim_messages
-from langgraph.prebuilt import create_react_agent
-
-TOKEN_LIMIT = 75_000
+from deepagents import create_deep_agent as _deepagents_create
+from deepagents.backends import StateBackend
+from deepagents.middleware.summarization import create_summarization_middleware
+from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
+from langchain_core.messages import HumanMessage
 
 
 def _get_chat_model(model_str: str):
@@ -33,42 +33,28 @@ def _get_chat_model(model_str: str):
         raise ValueError(f"Unsupported provider: {provider}")
 
 
-def _make_compaction_hook(token_limit: int):
-    """Create a pre_model_hook that trims messages when they exceed the token limit."""
-
-    def compact_messages(state: dict) -> dict:
-        messages = state.get("messages", [])
-        trimmed = trim_messages(
-            messages,
-            max_tokens=token_limit,
-            token_counter="approximate",
-            strategy="last",
-            include_system=True,
-            start_on="human",
-        )
-        return {"messages": trimmed}
-
-    return compact_messages
-
-
 class DeepAgent:
-    """A LangGraph-backed ReAct agent with tool calling and context compaction."""
+    """LangChain Deep Agents harness with text2sql tools and system prompt."""
 
     def __init__(
         self,
         model_str: str,
         tools: list,
         system_prompt: str,
-        token_limit: int = TOKEN_LIMIT,
     ):
         self.llm = _get_chat_model(model_str)
         self.system_prompt = system_prompt
 
-        self.agent = create_react_agent(
+        backend = StateBackend()
+        self.agent = _deepagents_create(
             model=self.llm,
             tools=tools,
-            prompt=SystemMessage(content=system_prompt),
-            pre_model_hook=_make_compaction_hook(token_limit),
+            system_prompt=system_prompt,
+            middleware=[
+                create_summarization_middleware(self.llm, backend),
+                AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore"),
+            ],
+            subagents=[],
         )
 
     def invoke(self, input_dict: dict) -> dict:
@@ -90,12 +76,11 @@ def create_deep_agent(
     model: str,
     tools: list,
     system_prompt: str,
-    token_limit: int = TOKEN_LIMIT,
+    token_limit: int = 75_000,  # kept for backward compatibility
 ) -> DeepAgent:
     """Create a Deep Agent with tools and a system prompt."""
     return DeepAgent(
         model_str=model,
         tools=tools,
         system_prompt=system_prompt,
-        token_limit=token_limit,
     )
