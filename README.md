@@ -151,11 +151,6 @@ WHERE order_date >= DATE('now', '-12 months')
   AND status != 'cancelled'
 ```
 
-## customer home address
-Customer addresses are in `customer_addresses`, NOT on the `customers` table.
-- Join on `customers.cust_id = customer_addresses.cust_id`
-- Filter: `addr_type = 'billing'` for billing, `addr_type = 'shipping'` for shipping
-- `is_default = 1` for the primary address
 ```
 
 ```python
@@ -166,27 +161,6 @@ engine = TextSQL(
 ```
 
 The agent gets a `lookup_example` tool. When a question involves a business concept like "net revenue" or "active customers," the agent calls `lookup_example("net revenue")` and gets your guidance before writing SQL.
-
-### Why examples, not fine-tuning
-
-Fine-tuning bakes knowledge into model weights. When your schema changes, you retrain. When you add a table, you retrain. When a column gets renamed, you retrain.
-
-Examples are a markdown file. Edit it, and the next query uses the updated guidance. No training pipeline, no GPU costs, no deployment. An analyst who knows the schema can write an example in 2 minutes that fixes a class of failures.
-
-## Custom instructions
-
-For global rules that apply to every query:
-
-```python
-engine = TextSQL(
-    "postgresql://localhost/mydb",
-    instructions="""
-    - Revenue always means net revenue (after refunds)
-    - Always exclude test accounts (email LIKE '%@test.%')
-    - Date columns are stored as TEXT in ISO format
-    """,
-)
-```
 
 ## Tracing
 
@@ -224,6 +198,10 @@ text2sql query "sqlite:///mydb.db" "How many orders per month?"
 # With options
 text2sql ask "postgresql://localhost/mydb" --model anthropic:claude-sonnet-4-6
 ```
+
+## Built on Deep Agents
+
+The agent loop is powered by [Deep Agents](https://github.com/langchain-ai/deepagents) (`langchain-ai/deepagents`). We use a minimal middleware stack — just automatic context compaction (summarizes older messages when the conversation gets long) and Anthropic prompt caching (reduces API costs). All other default middleware (filesystem tools, sub-agents, todo lists) is disabled so the agent only sees the text2sql tools it needs.
 
 ## Architecture
 
