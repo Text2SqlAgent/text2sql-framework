@@ -30,6 +30,8 @@ class SQLResult:
     commentary: str = ""
     tool_calls_made: int = 0
     iterations: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
 
     @property
     def success(self) -> bool:
@@ -152,7 +154,16 @@ class SQLGenerator:
         last_ai_timestamp = self.tracer._current.start_time if self.tracer and self.tracer._current else 0.0
 
         for msg in messages:
-            msg_time = getattr(msg, "response_metadata", {}).get("timestamp", 0) if hasattr(msg, "response_metadata") else 0
+            resp_meta = getattr(msg, "response_metadata", {}) if hasattr(msg, "response_metadata") else {}
+            msg_time = resp_meta.get("timestamp", 0)
+
+            # Accumulate token usage from AIMessages
+            usage = resp_meta.get("usage", {})
+            if usage and self.tracer:
+                self.tracer.record_token_usage(
+                    usage.get("input_tokens", 0),
+                    usage.get("output_tokens", 0),
+                )
 
             # AIMessage with tool_calls
             if hasattr(msg, "tool_calls") and msg.tool_calls:
@@ -235,6 +246,14 @@ class SQLGenerator:
                 iterations=tool_calls_made,
             )
 
+        # Pull token counts from the trace
+        input_tokens = 0
+        output_tokens = 0
+        if self.tracer and self.tracer.traces:
+            last_trace = self.tracer.traces[-1]
+            input_tokens = last_trace.input_tokens
+            output_tokens = last_trace.output_tokens
+
         return SQLResult(
             question=question,
             sql=final_sql,
@@ -243,6 +262,8 @@ class SQLGenerator:
             commentary=commentary,
             tool_calls_made=tool_calls_made,
             iterations=tool_calls_made,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
         )
 
 

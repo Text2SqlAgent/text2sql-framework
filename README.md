@@ -1,11 +1,16 @@
 # text2sql
 
-In the past few months we've seen LLMs massively improve at tool calling. This text to sql architecture takes full advangtage of that new capability by giving the LLM maximum flexability to pull in the context it needs. The architecture is very simple - you just give the LLM access to an execute sql tool so that it can explore the data schema and then test queries in a loop before returing the final answer. 
+A text-to-SQL SDK that gives an LLM one tool — `execute_sql` — and lets it explore the schema, write queries, and self-correct in a loop. No RAG pipeline, no semantic layer, no schema descriptions required. Just a connection string and an API key.
+
+**24/25 (96%) on Spider zero-shot. 25/25 after one round of automated trace analysis.**
 
 ```python
 from text2sql import TextSQL
 
-engine = TextSQL("postgresql://user:pass@localhost/mydb")
+engine = TextSQL(
+    "postgresql://user:pass@localhost/mydb",
+    trace_file="traces.jsonl",
+)
 result = engine.ask("Which customers have spent more than $10K this year?")
 
 print(result.sql)   # verified SQL
@@ -14,66 +19,71 @@ print(result.data)  # [{'name': 'Acme Corp', 'total': 14302.50}, ...]
 
 ## How it works
 
-To demonstrate how this architecture works, ive pasted in an agent trace below: 
+Below is a real agent trace from the [Spider benchmark](https://yale-lily.github.io/spider) — a concert/stadium database the LLM has never seen before:
+
+**Question:** *"Find the number of concerts that happened in the stadium with the highest capacity."*
 
 ```
-Question: "For the client whose loan was approved first on 1993/7/5,
-           what is the balance increase rate from 1993/3/22 to 1998/12/27?"
-
 ┌─────────────────────────────────────────────────────────────┐
 │ Tool:   execute_sql                                         │
 │ Input:  SELECT name FROM sqlite_master                      │
 │         WHERE type='table' AND name NOT LIKE 'sqlite_%'     │
-│ Output: account, card, client, disp, district, loan,        │
-│         order, trans                                        │
+│ Output: stadium, singer, concert, singer_in_concert         │
 ├─────────────────────────────────────────────────────────────┤
 │ Tool:   execute_sql                                         │
-│ Input:  SELECT sql FROM sqlite_master                       │
-│         WHERE type='table'                                  │
-│           AND name IN ('loan', 'trans', 'disp')             │
-│ Output: loan(loan_id, account_id, date, amount, duration…)  │
-│         trans(trans_id, account_id, date, type, balance…)    │
-│         disp(disp_id, client_id, account_id, type…)         │
+│ Input:  PRAGMA table_info('stadium')                        │
+│ Output: Stadium_ID INT, Location TEXT, Name TEXT,            │
+│         Capacity INT, Highest INT, Lowest INT, Average INT  │
 ├─────────────────────────────────────────────────────────────┤
 │ Tool:   execute_sql                                         │
-│ Input:  SELECT loan_id, account_id FROM loan                │
-│         WHERE date = '1993-07-05'                           │
-│         ORDER BY loan_id LIMIT 1                            │
-│ Output: loan_id=5314  account_id=1787                       │
+│ Input:  PRAGMA table_info('concert')                        │
+│ Output: concert_ID INT, concert_Name TEXT, Theme TEXT,       │
+│         Stadium_ID TEXT, Year TEXT                           │
 ├─────────────────────────────────────────────────────────────┤
 │ Tool:   execute_sql                                         │
-│ Input:  SELECT balance FROM trans                           │
-│         WHERE account_id = 1787 AND date = '1993-03-22'     │
-│ Output: balance = 1100                                      │
+│ Input:  SELECT COUNT(*) FROM concert                        │
+│         WHERE Stadium_ID = (SELECT Stadium_ID               │
+│         FROM stadium ORDER BY Capacity DESC LIMIT 1)        │
+│ Output: 0    ← wrong! type mismatch (INT vs TEXT)           │
 ├─────────────────────────────────────────────────────────────┤
 │ Tool:   execute_sql                                         │
-│ Input:  SELECT balance FROM trans                           │
-│         WHERE account_id = 1787 AND date = '1998-12-27'     │
-│ Output: balance = 5835                                      │
+│ Input:  SELECT Stadium_ID, Name, Capacity FROM stadium      │
+│         ORDER BY Capacity DESC LIMIT 5                      │
+│ Output: 4 | Hampden Park | 52500                            │
+│         2 | Somerset Park | 11998  …                        │
 ├─────────────────────────────────────────────────────────────┤
 │ Tool:   execute_sql                                         │
-│ Input:  WITH first_loan AS (…),                             │
-│              balance_start AS (…),                          │
-│              balance_end AS (…)                             │
-│         SELECT ROUND((end - start) / start * 100, 2)        │
-│           AS increase_rate                                  │
-│ Output: increase_rate = 430.45%  ✓                          │
+│ Input:  SELECT Stadium_ID, concert_Name                     │
+│         FROM concert LIMIT 10                               │
+│ Output: 1 | Auditions                                       │
+│         2 | Super bootcamp  …                               │
+├─────────────────────────────────────────────────────────────┤
+│ Tool:   execute_sql                                         │
+│ Input:  SELECT COUNT(*) FROM concert                        │
+│         WHERE CAST(Stadium_ID AS INT) =                     │
+│           (SELECT Stadium_ID FROM stadium                   │
+│            ORDER BY Capacity DESC LIMIT 1)                  │
+│ Output: 0  ✓                                                │
 └─────────────────────────────────────────────────────────────┘
 ```
 
+The agent got a wrong result (0 concerts), realized `Stadium_ID` was stored as TEXT in one table and INT in another, investigated by sampling actual data, then fixed the type mismatch with `CAST`. Seven tool calls, all autonomous.
 
-The agent sees the actual query results at every step. If it writes a query and the output doesn't look right — empty results, unexpected columns, numbers that don't make sense — it goes back to the schema, tries different tables or joins, and re-executes. This self-correction loop runs until the agent is confident the results answer the question.
-
-This is fundamentally different from one-shot RAG, where there's no feedback loop at all. The agent self-corrects at the **retrieval** stage (picked the wrong table? go find the right one), at the **SQL** stage (syntax error? read it and fix), and at the **results** stage (output doesn't match the question? rethink the approach).
-
+Schema retrieval and SQL generation happen in the same loop, not as separate pipeline stages. If the agent picks the wrong table, it goes back and finds the right one. If a query errors, it reads the error message and fixes it. If the output doesn't look right, it rethinks its approach.
 
 ## Benchmarks
 
-Tested on the [BIRD financial benchmark](https://bird-bench.github.io/) — 8 questions (6 challenging, 2 moderate) against a real Czech banking schema with 8 tables.
+Tested on the [Spider benchmark](https://yale-lily.github.io/spider) — the most widely used text-to-SQL evaluation, with 10,000+ questions across 200 databases. We ran the 25 unique questions from the `concert_singer` dev set — 4 tables, a mix of easy through extra-hard difficulty, covering aggregations, JOINs, subqueries, and set operations (INTERSECT/EXCEPT).
 
-**6/8 on the first run. 8/8 after one round of trace-driven improvements.**
+| Difficulty | Questions | Correct | Score |
+|---|---|---|---|
+| Easy | 8 | 8 | 100% |
+| Medium | 11 | 10 | 91% |
+| Hard | 4 | 4 | 100% |
+| Extra Hard | 3 | 3 | 100% |
+| **Total** | **25** | **24** | **96%** |
 
-→ [Full benchmark results and traces](bird_financial_benchmark.md)
+**24/25 (96%) on the first run, zero-shot, no examples.** The single failure was a LEFT vs INNER JOIN ambiguity on a bridge table. After one round of `analyze_traces` through the MCP server, the scenarios file caught this pattern and the agent got **25/25** on retest.
 
 ## Install
 
@@ -185,6 +195,39 @@ print(engine.trace_summary())
 # }
 ```
 
+
+## MCP Server
+
+The text2sql MCP server plugs into Claude Code, Cursor, or any MCP-compatible coding agent. It reads your query traces, feeds them to an LLM, and automatically updates your scenarios file with domain knowledge the agent was missing.
+
+```bash
+pip install text2sql-mcp
+```
+
+Add to your `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "text2sql": {
+      "command": "text2sql-mcp",
+      "env": {
+        "TEXT2SQL_DB": "sqlite:///mydb.db",
+        "TEXT2SQL_TRACES": "traces.jsonl",
+        "TEXT2SQL_EXAMPLES": "scenarios.md",
+        "ANTHROPIC_API_KEY": "sk-ant-..."
+      }
+    }
+  }
+}
+```
+
+**Two tools:**
+
+- `analyze_traces` — Processes unread traces, identifies gaps in your scenarios file, and writes improvements directly. Run this after accumulating new query traces.
+- `get_summary` — Quick stats: total traces, unread count, success rate, scenario count.
+
+The improvement loop: run queries → traces accumulate → `analyze_traces` reads them → scenarios.md gets better → future queries succeed more often.
 
 ## CLI
 

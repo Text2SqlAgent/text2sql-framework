@@ -25,6 +25,7 @@ venv/
 
 # Traces
 *.traces.jsonl
+traces_*.jsonl
 traces/
 
 # OS
@@ -39,6 +40,7 @@ next-env.d.ts
 
 # Claude Code
 .claude/
+.mcp.json
 
 # Playwright
 .playwright-mcp/
@@ -54,3 +56,22 @@ traces_v*.jsonl
 substack_draft.md
 deepagents/
 =*
+
+# Benchmark runners (contain API keys)
+run_*.py
+eval_*.py
+eval_*.csv
+
+# Benchmark data
+spider_benchmark/
+bird_benchmark/
+
+# Dev artifacts
+*.md.bak
+.text2sql_read.json
+mcp_wrapper.sh
+deepagents_shim_REMOVED/
+SHELVED_*.md
+bird_financial_examples.md
+bird_financial_tags.py
+generate_report.py

@@ -119,6 +119,10 @@ class QueryTrace:
     # LLM reasoning text between tool calls
     llm_reasoning_steps: List[str] = field(default_factory=list)
 
+    # Token usage
+    input_tokens: int = 0
+    output_tokens: int = 0
+
     def to_dict(self):
         return asdict(self)
 
@@ -370,6 +374,14 @@ class Tracer:
                 scenario_queried=arguments.get("scenario", ""),
                 content_returned=result[:300],
             ))
+
+    def record_token_usage(self, input_tokens, output_tokens):
+        # type: (int, int) -> None
+        """Accumulate token usage from an LLM response."""
+        if not self._current:
+            return
+        self._current.input_tokens += input_tokens
+        self._current.output_tokens += output_tokens
 
     def record_reasoning(self, text):
         # type: (str) -> None
@@ -625,5 +637,7 @@ def _dict_to_query_trace(data):
         sql_errors_structured=sql_errors_structured,
         schema_backtracking_count=backtrack,
         llm_reasoning_steps=reasoning,
+        input_tokens=data.get("input_tokens", 0),
+        output_tokens=data.get("output_tokens", 0),
     )
     return trace

@@ -9,9 +9,6 @@ the text2sql tools passed in by the caller.
 from __future__ import annotations
 
 from deepagents import create_deep_agent as _deepagents_create
-from deepagents.backends import StateBackend
-from deepagents.middleware.summarization import create_summarization_middleware
-from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.messages import HumanMessage
 
 
@@ -45,15 +42,10 @@ class DeepAgent:
         self.llm = _get_chat_model(model_str)
         self.system_prompt = system_prompt
 
-        backend = StateBackend()
         self.agent = _deepagents_create(
             model=self.llm,
             tools=tools,
             system_prompt=system_prompt,
-            middleware=[
-                create_summarization_middleware(self.llm, backend),
-                AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore"),
-            ],
             subagents=[],
         )
 
