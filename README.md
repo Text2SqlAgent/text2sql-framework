@@ -138,67 +138,37 @@ TextSQL("snowflake://user:pass@account/db/schema")
 
 The agent automatically detects the SQL dialect and adjusts its schema exploration strategy — `information_schema` for PostgreSQL/MySQL/Snowflake, `PRAGMA` for SQLite, `sys.tables` for SQL Server.
 
-## Example scenarios (optional)
+## Scenarios and the feedback loop
 
-Real databases have jargon, business logic, and naming conventions that no LLM can guess. The `examples` parameter lets you teach the agent your domain:
+The agent works out of the box with just a connection string — but real databases have jargon, business logic, and naming conventions that no LLM can guess. That's where `scenarios.md` comes in.
+
+A scenarios file is a markdown file where each `## heading` contains domain knowledge the agent can't infer from the schema alone — business rules, column name translations, tricky join paths, corrective guidance:
 
 ```markdown
-<!-- scenarios.md -->
-
 ## net revenue
 Net revenue = gross revenue minus refunds.
+Use INNER JOIN between orders and payments, not LEFT JOIN.
 - `orders.amt_ttl` is the gross order total
 - Refunds are in the `payments` table where `is_refund = 1`
-- Net = SUM(orders.amt_ttl) + SUM(payments.amt) WHERE is_refund = 1
-  (refund amounts are stored as negative values)
 
-## active customers
-A customer is "active" if they placed at least one non-cancelled order
-in the last 12 months.
-```sql
-SELECT DISTINCT cust_id FROM orders
-WHERE order_date >= DATE('now', '-12 months')
-  AND status != 'cancelled'
+    -- CORRECT
+    SELECT SUM(o.amt_ttl) + SUM(p.amt) FROM orders o
+    JOIN payments p ON o.order_id = p.order_id WHERE p.is_refund = 1;
 ```
 
-```
+At runtime, the agent doesn't get the entire file dumped into its context. It sees a list of scenario titles and gets a `lookup_example` tool. When it's about to write a query involving revenue, it calls `lookup_example("net revenue")` and retrieves the full guidance before writing SQL. The agent decides when it needs help, and only pulls in what's relevant.
 
 ```python
 engine = TextSQL(
     "postgresql://localhost/mydb",
     examples="scenarios.md",
+    trace_file="traces.jsonl",
 )
 ```
 
-The agent gets a `lookup_example` tool. When a question involves a business concept like "net revenue" or "active customers," the agent calls `lookup_example("net revenue")` and gets your guidance before writing SQL.
+### Building scenarios automatically with the MCP
 
-## Tracing
-
-Every query is traced — which tables the agent explored, what SQL it tried, what errors it hit, how it self-corrected:
-
-```python
-engine = TextSQL(
-    "sqlite:///mydb.db",
-    trace_file="traces.jsonl",  # writes traces to disk
-)
-
-result = engine.ask("Top customers by spend")
-
-# See aggregate stats
-print(engine.trace_summary())
-# {
-#   'total_queries': 1,
-#   'success_rate': 1.0,
-#   'avg_tool_calls_per_query': 4.2,
-#   'sql_error_rate': 0.0,
-#   ...
-# }
-```
-
-
-## MCP Server
-
-The text2sql MCP server plugs into Claude Code, Cursor, or any MCP-compatible coding agent. It reads your query traces, feeds them to an LLM, and automatically updates your scenarios file with domain knowledge the agent was missing.
+You don't have to write scenarios by hand. The SDK saves full traces of every query — which tables the agent explored, what SQL it tried, what errors it hit, how it self-corrected. The MCP server reads these traces, identifies where the agent struggled, and writes corrective scenarios to `scenarios.md` automatically.
 
 ```bash
 pip install text2sql-mcp
@@ -222,12 +192,12 @@ Add to your `.mcp.json`:
 }
 ```
 
-**Two tools:**
+The MCP server plugs into Claude Code, Cursor, or any MCP-compatible assistant and exposes two tools:
 
-- `analyze_traces` — Processes unread traces, identifies gaps in your scenarios file, and writes improvements directly. Run this after accumulating new query traces.
-- `get_summary` — Quick stats: total traces, unread count, success rate, scenario count.
+- **`analyze_traces`** — reads unread traces, sends them to an LLM along with the database schema and current scenarios, and writes improvements to `scenarios.md`
+- **`get_summary`** — quick stats: total traces, success rate, unread count, scenario count
 
-The improvement loop: run queries → traces accumulate → `analyze_traces` reads them → scenarios.md gets better → future queries succeed more often.
+The loop: run queries → traces accumulate → call `analyze_traces` → scenarios.md gets better → future queries use the improved scenarios via `lookup_example`. This is how we went from 96% to 100% on Spider — the MCP identified a LEFT vs INNER JOIN pattern the agent kept getting wrong and wrote a corrective scenario that fixed it.
 
 ## CLI
 
