@@ -2,7 +2,7 @@
 
 A text-to-SQL SDK that gives an LLM one tool — `execute_sql` — and lets it explore the schema, write queries, and self-correct in a loop. No RAG pipeline, no semantic layer, no schema descriptions required. Just a connection string and an API key.
 
-**24/25 (96%) on Spider zero-shot. 25/25 after one round of automated trace analysis.**
+**19/20 (95%) on Spider zero-shot across 80 tables and 20 databases. 20/20 after adding one scenario.**
 
 ```python
 from text2sql import TextSQL
@@ -19,71 +19,50 @@ print(result.data)  # [{'name': 'Acme Corp', 'total': 14302.50}, ...]
 
 ## How it works
 
-Below is a real agent trace from the [Spider benchmark](https://yale-lily.github.io/spider) — a concert/stadium database the LLM has never seen before:
+Below is a real agent trace from the [Spider benchmark](https://yale-lily.github.io/spider). The agent is connected to a single database containing **80 tables** from 20 different schemas — it has to find the right tables for each question on its own.
 
-**Question:** *"Find the number of concerts that happened in the stadium with the highest capacity."*
+**Question:** *"List the name of singers in ascending order of net worth."*
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ Tool:   execute_sql                                         │
 │ Input:  SELECT name FROM sqlite_master                      │
 │         WHERE type='table' AND name NOT LIKE 'sqlite_%'     │
-│ Output: stadium, singer, concert, singer_in_concert         │
+│ Output: battle, ship, death, continents, countries,         │
+│         car_makers, model_list, car_names, cars_data,       │
+│         stadium, singer, concert, singer_in_concert,        │
+│         course, teacher, … (80 tables)                      │
 ├─────────────────────────────────────────────────────────────┤
 │ Tool:   execute_sql                                         │
-│ Input:  PRAGMA table_info('stadium')                        │
-│ Output: Stadium_ID INT, Location TEXT, Name TEXT,            │
-│         Capacity INT, Highest INT, Lowest INT, Average INT  │
+│ Input:  PRAGMA table_info('singer')                         │
+│ Output: Singer_ID INT, Name TEXT, Country TEXT,              │
+│         Song_Name TEXT, Song_release_year TEXT,              │
+│         Age INT, Is_male BOOL                               │
+│         ← no Net_Worth column — wrong table                 │
 ├─────────────────────────────────────────────────────────────┤
 │ Tool:   execute_sql                                         │
-│ Input:  PRAGMA table_info('concert')                        │
-│ Output: concert_ID INT, concert_Name TEXT, Theme TEXT,       │
-│         Stadium_ID TEXT, Year TEXT                           │
+│ Input:  PRAGMA table_info('singer_solo')                    │
+│ Output: Singer_ID INT, Name TEXT, Birth_Year REAL,          │
+│         Net_Worth_Millions REAL, Citizenship TEXT            │
+│         ← found it                                          │
 ├─────────────────────────────────────────────────────────────┤
 │ Tool:   execute_sql                                         │
-│ Input:  SELECT COUNT(*) FROM concert                        │
-│         WHERE Stadium_ID = (SELECT Stadium_ID               │
-│         FROM stadium ORDER BY Capacity DESC LIMIT 1)        │
-│ Output: 0    ← wrong! type mismatch (INT vs TEXT)           │
-├─────────────────────────────────────────────────────────────┤
-│ Tool:   execute_sql                                         │
-│ Input:  SELECT Stadium_ID, Name, Capacity FROM stadium      │
-│         ORDER BY Capacity DESC LIMIT 5                      │
-│ Output: 4 | Hampden Park | 52500                            │
-│         2 | Somerset Park | 11998  …                        │
-├─────────────────────────────────────────────────────────────┤
-│ Tool:   execute_sql                                         │
-│ Input:  SELECT Stadium_ID, concert_Name                     │
-│         FROM concert LIMIT 10                               │
-│ Output: 1 | Auditions                                       │
-│         2 | Super bootcamp  …                               │
-├─────────────────────────────────────────────────────────────┤
-│ Tool:   execute_sql                                         │
-│ Input:  SELECT COUNT(*) FROM concert                        │
-│         WHERE CAST(Stadium_ID AS INT) =                     │
-│           (SELECT Stadium_ID FROM stadium                   │
-│            ORDER BY Capacity DESC LIMIT 1)                  │
-│ Output: 0  ✓                                                │
+│ Input:  SELECT Name FROM singer_solo                        │
+│         ORDER BY Net_Worth_Millions ASC                     │
+│ Output: Abigail Johnson, Susanne Klatten,                   │
+│         Gina Rinehart, Iris Fontbona, …  ✓                  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-The agent got a wrong result (0 concerts), realized `Stadium_ID` was stored as TEXT in one table and INT in another, investigated by sampling actual data, then fixed the type mismatch with `CAST`. Seven tool calls, all autonomous.
+The agent saw 80 tables, found two `singer` tables, inspected both, identified which one had the `Net_Worth_Millions` column, and wrote the correct query. Four tool calls, all autonomous.
 
 Schema retrieval and SQL generation happen in the same loop, not as separate pipeline stages. If the agent picks the wrong table, it goes back and finds the right one. If a query errors, it reads the error message and fixes it. If the output doesn't look right, it rethinks its approach.
 
 ## Benchmarks
 
-Tested on the [Spider benchmark](https://yale-lily.github.io/spider) — the most widely used text-to-SQL evaluation, with 10,000+ questions across 200 databases. We ran the 25 unique questions from the `concert_singer` dev set — 4 tables, a mix of easy through extra-hard difficulty, covering aggregations, JOINs, subqueries, and set operations (INTERSECT/EXCEPT).
+Tested on the [Spider benchmark](https://yale-lily.github.io/spider) — the most widely used text-to-SQL evaluation, with 10,000+ questions across 200 databases. We merged all 20 dev-set databases into a single 80-table database and ran 20 questions — one per database, randomly selected. The agent had to navigate 80 tables to find the right ones for each question.
 
-| Difficulty | Questions | Correct | Score |
-|---|---|---|---|
-| Easy | 8 | 8 | 100% |
-| Medium | 11 | 10 | 91% |
-| Hard | 4 | 4 | 100% |
-| Extra Hard | 3 | 3 | 100% |
-| **Total** | **25** | **24** | **96%** |
-
-**24/25 (96%) on the first run, zero-shot, no examples.** The single failure was a LEFT vs INNER JOIN ambiguity on a bridge table. After one round of `analyze_traces` through the MCP server, the scenarios file caught this pattern and the agent got **25/25** on retest.
+**19/20 (95%) zero-shot, no examples.** The single failure was an ambiguous question — *"What is maximum and minimum death toll caused each time?"* — where the agent returned per-battle results instead of a global aggregate. After adding a one-line scenario clarifying that "each time" means overall, the agent used `lookup_example` to retrieve the guidance and got it right: **20/20.**
 
 ## Install
 
