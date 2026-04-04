@@ -2,7 +2,7 @@
 
 A text-to-SQL SDK that gives an LLM one tool — `execute_sql` — and lets it explore the schema, write queries, and self-correct in a loop. No RAG pipeline, no semantic layer, no schema descriptions required. Just a connection string and an API key.
 
-Most text-to-SQL frameworks pre-compute which schema elements are relevant before the LLM ever sees the question. This architecture skips that entirely — the LLM drives its own context gathering, deciding which tables matter, how much detail it needs, and when to go back and try a different approach. Because it sees real query results at every step, it can validate its own work before returning an answer.
+Most text-to-SQL frameworks pre-compute which schema elements are relevant before the LLM ever sees the question. This architecture skips that entirely — the LLM drives its own context gathering, deciding which tables matter, how much detail it needs, and when to go back and try a different approach. This only recently became possible as LLMs got dramatically better at recursive tool use — calling a tool, reading the result, deciding what to do next, and repeating. Because the agent sees real query results at every step, it can validate its own work before returning an answer.
 
 **19/20 (95%) on Spider zero-shot across 80 tables and 20 databases. 20/20 after adding one scenario.**
 
