@@ -1,8 +1,8 @@
 # text2sql
 
-A text-to-SQL SDK that gives an LLM one tool — `execute_sql` — and lets it explore the schema, write queries, and self-correct in a loop. No RAG pipeline, no semantic layer, no schema descriptions required. Just a connection string and an API key.
+Until recently, LLMs couldn't reliably chain more than a handful of tool calls before losing the thread. Though frontier models now make dozens, hundreds, or even thousands of iterative tool calls from a single prompt, reading each result and deciding what to do next. This unlocks a different shape of text-to-SQL system: instead of pre-computing which schema elements are relevant, you can hand the LLM one tool (`execute_sql`) and let it explore the schema, write queries, test them against real data, and self-correct before returning a final answer. This SDK requires no RAG, semantic layer, schema descriptions, etc. All that is needed is a connection string and a frontier model, as shown in the example below.
 
-Most text-to-SQL frameworks pre-compute which schema elements are relevant before the LLM ever sees the question. This architecture skips that entirely — the LLM drives its own context gathering, deciding which tables matter, how much detail it needs, and when to go back and try a different approach. This only recently became possible as LLMs got dramatically better at recursive tool use — calling a tool, reading the result, deciding what to do next, and repeating. Because the agent sees real query results at every step, it can validate its own work before returning an answer.
+As models keep getting better at recursive tool use, the right move is to keep rearchitecting the harness so it constrains the LLM as little as possible (every guardrail you remove is capability you get back).
 
 **19/20 (95%) on Spider zero-shot across 80 tables and 20 databases. 20/20 after adding one scenario.**
 
