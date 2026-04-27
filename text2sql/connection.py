@@ -40,6 +40,51 @@ class Database:
         except Exception:
             return False
 
+    def verify_read_only(self, raise_on_writable: bool = False) -> bool:
+        """Probe whether the DB user has write privileges.
+
+        Attempts to create a temporary table inside a transaction, then
+        rolls back. If the write is permitted, the connection is writable.
+        The text2sql tool layer blocks destructive SQL via regex, but for
+        production use you should ALSO connect with a read-only DB user
+        so privilege boundaries are enforced by the database itself.
+
+        Returns:
+            True  — connection appears read-only (write was rejected).
+            False — connection is writable (write succeeded — caller should
+                    consider switching to a read-only DB user).
+
+        Raises:
+            PermissionError if raise_on_writable=True and the write succeeds.
+        """
+        probe_sql = "CREATE TEMPORARY TABLE _t2s_ro_probe (x INTEGER)"
+        try:
+            with self.engine.connect() as conn:
+                trans = conn.begin()
+                try:
+                    conn.execute(text(probe_sql))
+                    # Write succeeded — connection is writable.
+                    trans.rollback()
+                    if raise_on_writable:
+                        raise PermissionError(
+                            "Database connection is writable. text2sql is intended "
+                            "for read-only analytical access; connect with a "
+                            "read-only DB user (or pass enforce_read_only=False to "
+                            "disable this check)."
+                        )
+                    return False
+                except PermissionError:
+                    raise
+                except Exception:
+                    # Write was rejected — the desired outcome.
+                    trans.rollback()
+                    return True
+        except PermissionError:
+            raise
+        except Exception:
+            # Engine couldn't even open — we can't determine; treat as inconclusive.
+            return True
+
     def get_schema_summary(self) -> dict:
         """Return structured schema summary using SQLAlchemy Inspector.
 

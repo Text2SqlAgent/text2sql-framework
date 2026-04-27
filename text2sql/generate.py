@@ -42,6 +42,36 @@ class SQLResult:
             return f"Error: {self.error}\nSQL: {self.sql}"
         return f"SQL: {self.sql}\n({len(self.data)} rows)"
 
+    def to_dict_list(self) -> list[dict]:
+        """Return rows as a list of plain dicts (data is already this shape;
+        this is the explicit accessor)."""
+        return list(self.data)
+
+    def to_csv(self, path: str, encoding: str = "utf-8") -> str:
+        """Write rows to a CSV file. Returns the path written.
+
+        Useful for "generate an expense report" workflows where the caller
+        wants a file artifact, not just a list of dicts.
+        """
+        import csv
+        from pathlib import Path
+
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+
+        if not self.data:
+            # Still create an empty file with a header line if we know the SQL,
+            # otherwise just an empty file.
+            out.write_text("", encoding=encoding)
+            return str(out)
+
+        fieldnames = list(self.data[0].keys())
+        with open(out, "w", newline="", encoding=encoding) as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(self.data)
+        return str(out)
+
 
 SYSTEM_PROMPT = """You are a SQL expert. Translate natural language questions into SQL queries.
 
@@ -131,9 +161,21 @@ class SQLGenerator:
             example_list_note=example_list_note,
         )
 
-    def ask(self, question: str, max_rows: int | None = None) -> SQLResult:
+    def ask(
+        self,
+        question: str,
+        max_rows: int | None = None,
+        user_id: str | None = None,
+        user_role: str | None = None,
+        metadata: dict | None = None,
+    ) -> SQLResult:
         if self.tracer:
             self.tracer.start_query(question)
+            self.tracer.attach_user_context(
+                user_id=user_id,
+                user_role=user_role,
+                metadata=metadata,
+            )
 
         result = self.agent.invoke(
             {"messages": [{"role": "user", "content": question}]}
