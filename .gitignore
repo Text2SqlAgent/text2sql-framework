@@ -61,6 +61,8 @@ deepagents/
 run_*.py
 eval_*.py
 eval_*.csv
+# (exception: the demo ETL loader is shipping code, not a benchmark)
+!etl/run_demo.py
 
 # Benchmark data
 spider_benchmark/
