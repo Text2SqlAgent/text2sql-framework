@@ -39,8 +39,15 @@ dependencies = [
 openai = ["langchain-openai>=0.3"]
 anthropic = ["langchain-anthropic>=0.3"]
 dashboard = ["httpx>=0.27"]
-all = ["langchain-openai>=0.3", "langchain-anthropic>=0.3", "httpx>=0.27"]
-dev = ["pytest>=7.0"]
+api = ["fastapi>=0.110", "uvicorn[standard]>=0.27"]
+all = [
+    "langchain-openai>=0.3",
+    "langchain-anthropic>=0.3",
+    "httpx>=0.27",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+]
+dev = ["pytest>=7.0", "httpx>=0.27"]
 
 [project.scripts]
 text2sql = "text2sql.cli:main"
