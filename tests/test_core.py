@@ -53,7 +53,11 @@ def sample_db():
 
     db = Database("sqlite:///{}".format(path))
     yield db
-    os.unlink(path)
+    db.engine.dispose()
+    try:
+        os.unlink(path)
+    except PermissionError:
+        pass  # Windows holds SQLite files briefly after dispose; OS cleans up on exit
 
 
 class TestDatabase:
@@ -202,6 +206,59 @@ class TestExamples:
     def test_lookup_tool_no_store(self):
         result = execute_tool("lookup_example", {"scenario": "anything"})
         assert "No example scenarios" in result
+
+
+class TestReadOnlyBypassPrevention:
+    """Regression tests for security bypasses identified in the attack-surface analysis."""
+
+    def test_blocks_writable_cte(self, sample_db):
+        # PostgreSQL writable CTE: WITH d AS (DELETE ...) SELECT *
+        result = execute_tool(
+            "execute_sql",
+            {"sql": "WITH d AS (DELETE FROM customers RETURNING *) SELECT * FROM d"},
+            db=sample_db,
+        )
+        assert "Blocked" in result
+
+    def test_blocks_subquery_dml(self, sample_db):
+        # DML inside a subquery — DELETE not at line start
+        result = execute_tool(
+            "execute_sql",
+            {"sql": "SELECT * FROM (DELETE FROM customers RETURNING customer_id) AS d"},
+            db=sample_db,
+        )
+        assert "Blocked" in result
+
+    def test_blocks_multistatement(self, sample_db):
+        # Two statements on one line — SELECT first, then DELETE
+        result = execute_tool(
+            "execute_sql",
+            {"sql": "SELECT 1; DELETE FROM customers"},
+            db=sample_db,
+        )
+        assert "Blocked" in result
+
+    def test_final_sql_guard_blocks_destructive(self, sample_db):
+        # Critical fix: _parse_result must apply _is_read_only to the final SQL
+        # even if the LLM somehow emits a destructive statement in its response.
+        from unittest.mock import MagicMock
+        from text2sql.generate import SQLGenerator
+
+        gen = SQLGenerator.__new__(SQLGenerator)
+        gen.db = sample_db
+        gen.tracer = None
+
+        mock_msg = MagicMock()
+        mock_msg.content = "```sql\nDELETE FROM customers\n```"
+        mock_msg.tool_calls = []
+        mock_msg.type = "ai"
+
+        result = gen._parse_result("delete all customers", [mock_msg])
+        assert result.error is not None
+        assert "Blocked" in result.error
+        # Confirm no rows were actually deleted
+        rows = sample_db.execute("SELECT COUNT(*) AS n FROM customers")
+        assert rows[0]["n"] == 3
 
 
 class TestDialects:
