@@ -15,7 +15,7 @@ from text2sql.agent import create_deep_agent
 from text2sql.connection import Database
 from text2sql.dialects import get_dialect_guide
 from text2sql.examples import ExampleStore
-from text2sql.tools import make_tools
+from text2sql.tools import make_tools, _is_read_only
 from text2sql.tracing import Tracer
 
 
@@ -230,13 +230,16 @@ class SQLGenerator:
         # Execute the SQL the agent specified in its response
         data = []
         if final_sql and not error:
-            try:
-                rows = self.db.execute(final_sql)
-                if max_rows is not None:
-                    rows = rows[:max_rows]
-                data = rows
-            except Exception as e:
-                error = f"Final execution failed: {e}"
+            if not _is_read_only(final_sql):
+                error = "Blocked: final SQL failed read-only check."
+            else:
+                try:
+                    rows = self.db.execute(final_sql)
+                    if max_rows is not None:
+                        rows = rows[:max_rows]
+                    data = rows
+                except Exception as e:
+                    error = f"Final execution failed: {e}"
 
         if self.tracer:
             self.tracer.end_query(
