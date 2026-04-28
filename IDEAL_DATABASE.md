@@ -546,43 +546,84 @@ Add column comments on every business column. Build entity views
 
 ---
 
-## 12. Where unstructured documents live
+## 12. Documents — first-class part of the product
 
-OCR'd scans, PDFs, scattered Excel files don't go *into* the relational
-schema as text blobs. They live in object storage; the relational schema
-holds **references**.
+Customers don't only have an ERP. They also have business-relevant
+information scattered across PDFs, Excel files, scanned paper docs, and
+loose Word files on staff machines. The chatbot must be able to answer
+questions whose evidence sits in those files. Documents are therefore
+**in scope for this product**, not a separate service.
+
+We split documents into three buckets and route each to the handling
+that fits its shape:
+
+| Bucket | Examples | Handling | Where the answer lives |
+|---|---|---|---|
+| **Templated business docs** | invoices, POs, bills of lading, expense receipts, packing slips | Structured extraction at ingestion (Textract / Azure Document Intelligence / Mistral OCR / etc.) — extract fields straight into the relational layer | Rows in `fact_invoices`, `fact_expenses`, `fact_shipments`, … — answerable via SQL |
+| **Semi-structured spreadsheets** | warehouse Excel exports, manual ops reports, planning sheets | Parse to bronze, conform to silver, project into gold facts/dims | Rows in the relevant gold facts/dims — answerable via SQL |
+| **Unstructured prose** | contracts, emails, meeting notes, scopes of work, free-text addenda | OCR if needed, chunk + embed into a vector store; keep the original in object storage; reference from `dim_document` | Object storage + vector index — answerable via a `search_documents` tool |
+
+### dim_document — the registry every doc lands in
+
+Every document the system ingests gets a row in `dim_document`,
+regardless of which bucket it falls into. This is the join point between
+the relational layer and the prose-document path.
 
 ```sql
 CREATE TABLE gold.dim_document (
   document_id       BIGINT PRIMARY KEY,
-  document_type     TEXT NOT NULL,           -- 'invoice','contract','bill_of_lading'
+  document_type     TEXT NOT NULL,           -- 'invoice','contract','bill_of_lading','email',…
   storage_url       TEXT NOT NULL,           -- s3://bucket/customer/...
   filename          TEXT,
   uploaded_at       TIMESTAMPTZ NOT NULL,
   page_count        INT,
-  ocr_status        TEXT,                    -- 'pending','done','failed'
-  ocr_text_url      TEXT                     -- s3://... full text
+  ocr_status        TEXT,                    -- 'pending','done','failed','not_required'
+  ocr_text_url      TEXT,                    -- s3://... full text (when applicable)
+  vector_indexed    BOOLEAN NOT NULL DEFAULT false,
+  extraction_status TEXT                     -- 'pending','extracted','failed','not_applicable'
 );
 ```
 
-Then any relational row that came from a document references it:
+Any structured row that came from a document references it:
 
 ```sql
 ALTER TABLE gold.fact_invoices
   ADD COLUMN source_document_id BIGINT REFERENCES gold.dim_document;
 ```
 
-For the chat UI, two query paths:
-- **Structured questions** ("how much are we owed") → text2sql against
-  the gold schema. This document is about that path.
-- **Document questions** ("find the contract that mentioned 90-day terms")
-  → vector search over the OCR'd text in object storage. **Separate
-  service**, but the answer can link back to `dim_document` rows so the
-  user sees it inline with structured results.
+This means: a question about an invoice can return the numbers (from
+`fact_invoices`) **and** link to the original PDF (via
+`source_document_id` → `dim_document.storage_url`) in the same answer.
 
-This is the right place for the RAG path you originally considered — it
-finds the document, structured queries find the numbers, the UI stitches
-them.
+### Two tools, one agent
+
+The chat agent gets two tools and decides per question:
+
+- **`execute_sql`** (existing) — for numeric / structured questions. Hits
+  the gold schema as before. Most finance/ops questions land here, both
+  for ERP-sourced data and for fields extracted from templated docs.
+- **`search_documents`** (new, to build) — vector search over the prose
+  document store. For questions like "find the contract that mentioned
+  90-day payment terms" or "which supplier emails reference the
+  warehouse closure?" Returns ranked passages plus `dim_document` rows
+  so structured and unstructured results stitch into one reply.
+
+Some questions need both — e.g. "what's our exposure to suppliers with
+late-delivery clauses?" wants `search_documents` to find clauses, then
+`execute_sql` to aggregate the matching suppliers' open POs. The agent
+can chain.
+
+### Why this shape
+
+- **Single product surface** — the user types one question; the agent
+  picks the tool. No "structured vs documents" toggle in the UI.
+- **No information loss** — answers grounded in extracted-fact rows are
+  precise; answers grounded in passages cite the document. Either way
+  the system can show its work.
+- **No info we have goes unused** — if a fact lives only in a PDF, the
+  structured-extraction pipeline pulls it into the relational layer; if
+  it lives in prose, the RAG path finds it. The "no missed info"
+  quality bar requires both.
 
 ---
 
@@ -690,8 +731,11 @@ What needs to happen in order, per customer:
 - **Rolled-up cross-customer analytics** ("how does our customer's AR
   compare to the median?"). Requires a separate analytics warehouse with
   aggregated, anonymized data — outside the per-customer DB.
-- **Document-content questions.** Lives in the parallel RAG/vector path
-  (see §12), not text2sql.
+- **Conversation history / follow-ups** in the SDK. Belongs in the chat
+  session store on top.
+- **Insight synthesis as prose** ("AR is up 12% MoM driven by X and Y").
+  Logged as a TODO — needs a second LLM pass over the SQL result, with
+  citation guardrails so it can't invent numbers. Not in v1.
 
 ---
 
@@ -705,9 +749,13 @@ The DB design is the contract, but the plug-and-play vision needs:
 | **DB schema migrations** | not yet | a `db/migrations/*.sql` pack we run per customer; derived from §11 |
 | **`canonical.md` template** | partial | starter in `examples/canonical.md`; extend to logistics-specific entries |
 | **`scenarios.md` template** | partial | upstream sample exists; needs logistics/finance flavor |
-| **ETL flows** | not yet | per-source, separate repo (e.g. `t2s-ingest`); Prefect-based |
-| **OCR + document store** | not yet | separate repo (e.g. `t2s-docs`); Textract/Azure DI + S3 |
-| **Chat UI** | not yet | thin web app; calls `engine.ask()` per turn, streams the trace |
+| **ETL flows (ERP → bronze/silver/gold)** | not yet | per-source, separate repo (e.g. `t2s-ingest`); Prefect-based |
+| **Document ingestion — file discovery** | not yet | scrapers for the customer's file locations (Windows shares, OneDrive/SharePoint, per-laptop sync); land originals in S3 + register in `dim_document` |
+| **Document ingestion — structured extraction** | not yet | OCR + field extraction for templated docs (invoices, POs, BoLs, receipts) → rows in the relational facts; Textract / Azure Document Intelligence / Mistral OCR |
+| **Document ingestion — vector index** | not yet | chunk + embed prose docs (contracts, emails, notes) into a vector store; `vector_indexed=true` on `dim_document` |
+| **`search_documents` agent tool** | not yet | second tool added to the text2sql agent; vector search against the prose store, returns ranked passages + `dim_document` rows |
+| **Insight synthesis pass** | not yet (TODO) | optional second LLM call: turns `(sql, result, trace)` → prose insights with citation guardrails |
+| **Chat UI** | not yet | thin web app; calls `engine.ask()` per turn, streams the trace; **no quick-pick chips / question gallery — single chat input only** |
 | **Audit pipeline** | not yet | nightly job: trace JSONL → `audit.queries` table; queryable for compliance |
 | **Customer admin tool** | not yet | provisioning, migration, role rotation, canonical/scenario editing |
 

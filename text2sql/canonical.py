@@ -34,6 +34,7 @@ File format (same markdown style as scenarios.md):
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -80,7 +81,14 @@ class CanonicalQuery:
 
 
 def _tokenize(text: str) -> list[str]:
-    return re.findall(r"[a-z0-9]+", text.lower())
+    # Strip diacritics so accented chars match their unaccented equivalents:
+    # "cuánto" -> "cuanto", "más" -> "mas", "año" -> "ano". NFD decomposes
+    # "á" into "a" + combining-acute; we drop combining marks. Without this
+    # the [a-z0-9]+ regex would split "cuánto" into ["cu", "nto"], breaking
+    # canonical matching for any non-English question.
+    normalized = unicodedata.normalize("NFD", text.lower())
+    ascii_only = "".join(c for c in normalized if not unicodedata.combining(c))
+    return re.findall(r"[a-z0-9]+", ascii_only)
 
 
 @dataclass
