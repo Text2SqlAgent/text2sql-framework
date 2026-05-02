@@ -14,6 +14,10 @@ venv/
 .env.local
 .env*.local
 
+# Customer data extracts (real customer data — keep local)
+/db/bronze/altocontrol/*.csv
+/db/bronze/altocontrol/_manifest.json
+
 # Databases
 *.db
 *.sqlite
@@ -61,6 +65,8 @@ deepagents/
 run_*.py
 eval_*.py
 eval_*.csv
+# (exception: the demo ETL loader is shipping code, not a benchmark)
+!etl/run_demo.py
 
 # Benchmark data
 spider_benchmark/

@@ -1,0 +1,35 @@
+# Local Postgres for developing the AltoControl bronze->silver->gold pipeline.
+# Starts a Postgres 16 instance on localhost:5433 (5433 not 5432 to avoid
+# clashing with any existing local Postgres).
+#
+# Usage:
+#   docker compose up -d postgres        # start
+#   docker compose ps                    # check status
+#   docker compose logs -f postgres      # tail logs
+#   docker compose down                  # stop (data persists in volume)
+#   docker compose down -v               # stop + wipe data
+#
+# Connection string for the loader:
+#   postgresql+psycopg://penicor:penicor@localhost:5433/penicor
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: penicor-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: penicor
+      POSTGRES_PASSWORD: penicor
+      POSTGRES_DB: penicor
+    ports:
+      - "5433:5432"
+    volumes:
+      - penicor_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U penicor -d penicor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  penicor_pgdata:

@@ -8,7 +8,7 @@ version = "0.2.0"
 description = "Text-to-SQL framework with tool-based schema retrieval. Built on LangChain's Deep Agents harness."
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.11,<4.0"
 authors = [
     { name = "Cooper Penniman" },
 ]
@@ -18,7 +18,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -36,11 +35,49 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-openai = ["langchain-openai>=0.3"]
-anthropic = ["langchain-anthropic>=0.3"]
+# LLM providers — pick one (or use [all] to install them all).
+openai     = ["langchain-openai>=0.3"]
+anthropic  = ["langchain-anthropic>=0.3"]
+openrouter = ["langchain-openrouter>=0.1"]
+
+# Service / infra extras
 dashboard = ["httpx>=0.27"]
-all = ["langchain-openai>=0.3", "langchain-anthropic>=0.3", "httpx>=0.27"]
-dev = ["pytest>=7.0"]
+api       = ["fastapi>=0.110", "uvicorn[standard]>=0.27", "alembic>=1.13", "psycopg[binary]>=3.1", "python-dotenv>=1.0"]
+
+# ETL pipeline (per-customer extract -> bronze -> silver -> gold).
+# Required to run anything under etl/ + examples/penicor_demo.py.
+#   - pyodbc   : SQL Server / Azure SQL connection (AltoControl extract)
+#   - pandas   : CSV read/write + bulk inserts
+#   - psycopg  : Postgres driver for the local consolidated DB
+#   - dotenv   : load .env files in scripts
+etl = [
+    "pyodbc>=5.0",
+    "pandas>=2.0",
+    "psycopg[binary]>=3.1",
+    "python-dotenv>=1.0",
+]
+
+# LangGraph Studio (interactive agent debugger). Brings in the langgraph CLI
+# with in-memory persistence; reads langgraph.json + studio_graph.py from the
+# repo root.
+studio = ["langgraph-cli[inmem]>=0.1"]
+
+# Everything (kitchen sink — convenient for dev, heavier).
+all = [
+    "langchain-openai>=0.3",
+    "langchain-anthropic>=0.3",
+    "langchain-openrouter>=0.1",
+    "httpx>=0.27",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "pyodbc>=5.0",
+    "pandas>=2.0",
+    "psycopg[binary]>=3.1",
+    "python-dotenv>=1.0",
+    "langgraph-cli[inmem]>=0.1",
+]
+
+dev = ["pytest>=7.0", "httpx>=0.27"]
 
 [project.scripts]
 text2sql = "text2sql.cli:main"

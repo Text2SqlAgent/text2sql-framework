@@ -26,6 +26,9 @@ def _get_chat_model(model_str: str):
     elif provider == "openai":
         from langchain_openai import ChatOpenAI
         return ChatOpenAI(model=model_name)
+    elif provider == "openrouter":
+        from langchain_openrouter import ChatOpenRouter
+        return ChatOpenRouter(model=model_name)
     else:
         raise ValueError(f"Unsupported provider: {provider}")
 

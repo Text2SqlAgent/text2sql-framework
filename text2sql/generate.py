@@ -42,6 +42,36 @@ class SQLResult:
             return f"Error: {self.error}\nSQL: {self.sql}"
         return f"SQL: {self.sql}\n({len(self.data)} rows)"
 
+    def to_dict_list(self) -> list[dict]:
+        """Return rows as a list of plain dicts (data is already this shape;
+        this is the explicit accessor)."""
+        return list(self.data)
+
+    def to_csv(self, path: str, encoding: str = "utf-8") -> str:
+        """Write rows to a CSV file. Returns the path written.
+
+        Useful for "generate an expense report" workflows where the caller
+        wants a file artifact, not just a list of dicts.
+        """
+        import csv
+        from pathlib import Path
+
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+
+        if not self.data:
+            # Still create an empty file with a header line if we know the SQL,
+            # otherwise just an empty file.
+            out.write_text("", encoding=encoding)
+            return str(out)
+
+        fieldnames = list(self.data[0].keys())
+        with open(out, "w", newline="", encoding=encoding) as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(self.data)
+        return str(out)
+
 
 SYSTEM_PROMPT = """You are a SQL expert. Translate natural language questions into SQL queries.
 
@@ -73,6 +103,32 @@ This is a **{dialect}** database.
 - Once the query executes successfully, your final response MUST include the SQL inside a ```sql code block. You may include brief commentary outside the code block if helpful. The results are captured automatically and displayed to the user separately.
 {instructions}"""
 
+SYSTEM_PROMPT_FIXED_SCHEMA = """You are a SQL expert. Translate natural language questions into SQL queries.
+
+This is a **{dialect}** database.
+
+## Schema
+{schema_section}
+{custom_metadata}
+## Tools
+
+- `execute_sql` — run any read-only SQL (SELECT, WITH, SHOW, DESCRIBE, PRAGMA). Use this to test queries. Use LIMIT to keep result sets under 100 rows when possible.
+{example_tool_note}
+## Workflow
+
+1. PLAN: Identify the relevant tables and columns from the schema provided above
+2. EXAMPLES: If the question involves a business concept you're unsure about, use `lookup_example` to get guidance{example_list_note}
+3. WRITE & EXECUTE: Write your SQL and execute it to verify it works
+4. FIX: If it errors, read the error, fix, and re-execute
+
+## Rules
+- Use the schema provided above — use exact table and column names from it
+- Write {dialect} SQL syntax
+- You MUST execute your final SQL via `execute_sql` before responding. Never return SQL you haven't run.
+- If execution fails, read the error, fix the SQL, and execute again. Repeat until it works.
+- Once the query executes successfully, your final response MUST include the SQL inside a ```sql code block. You may include brief commentary outside the code block if helpful. The results are captured automatically and displayed to the user separately.
+{instructions}"""
+
 
 class SQLGenerator:
     """Creates a Deep Agent pre-loaded with text2sql tools."""
@@ -85,6 +141,7 @@ class SQLGenerator:
         custom_metadata: str | None = None,
         example_store: ExampleStore | None = None,
         tracer: Tracer | None = None,
+        fixed_schema: str | None = None,
     ):
         self.db = db
         self.model = model
@@ -92,6 +149,7 @@ class SQLGenerator:
         self.custom_metadata = custom_metadata
         self.example_store = example_store
         self.tracer = tracer
+        self.fixed_schema = fixed_schema
 
         self.tools = make_tools(db, example_store)
         self.system_prompt = self._build_system_prompt()
@@ -104,7 +162,6 @@ class SQLGenerator:
 
     def _build_system_prompt(self) -> str:
         dialect = self.db.dialect
-        dialect_guide = get_dialect_guide(dialect)
 
         custom = ""
         if self.custom_metadata:
@@ -122,6 +179,19 @@ class SQLGenerator:
             if scenarios:
                 example_list_note = "\n   Available examples: {}".format(", ".join(scenarios))
 
+        # Use fixed schema prompt if schema is provided
+        if self.fixed_schema:
+            return SYSTEM_PROMPT_FIXED_SCHEMA.format(
+                dialect=dialect,
+                schema_section=self.fixed_schema,
+                custom_metadata=custom,
+                instructions=instructions,
+                example_tool_note=example_tool_note,
+                example_list_note=example_list_note,
+            )
+
+        # Use default prompt with schema exploration
+        dialect_guide = get_dialect_guide(dialect)
         return SYSTEM_PROMPT.format(
             dialect=dialect,
             dialect_guide=dialect_guide,
@@ -131,13 +201,26 @@ class SQLGenerator:
             example_list_note=example_list_note,
         )
 
-    def ask(self, question: str, max_rows: int | None = None) -> SQLResult:
+    def ask(
+        self,
+        question: str,
+        max_rows: int | None = None,
+        user_id: str | None = None,
+        user_role: str | None = None,
+        metadata: dict | None = None,
+        message_history: list[dict] | None = None,
+    ) -> SQLResult:
         if self.tracer:
             self.tracer.start_query(question)
+            self.tracer.attach_user_context(
+                user_id=user_id,
+                user_role=user_role,
+                metadata=metadata,
+            )
 
-        result = self.agent.invoke(
-            {"messages": [{"role": "user", "content": question}]}
-        )
+        # Prepend prior conversation turns so the agent has multi-turn context
+        messages = list(message_history or []) + [{"role": "user", "content": question}]
+        result = self.agent.invoke({"messages": messages})
 
         return self._parse_result(question, result["messages"], max_rows=max_rows)
 
