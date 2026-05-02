@@ -8,7 +8,7 @@ version = "0.2.0"
 description = "Text-to-SQL framework with tool-based schema retrieval. Built on LangChain's Deep Agents harness."
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10,<4.0"
+requires-python = ">=3.11,<4.0"
 authors = [
     { name = "Cooper Penniman" },
 ]
@@ -18,7 +18,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -43,7 +42,7 @@ openrouter = ["langchain-openrouter>=0.1"]
 
 # Service / infra extras
 dashboard = ["httpx>=0.27"]
-api       = ["fastapi>=0.110", "uvicorn[standard]>=0.27"]
+api       = ["fastapi>=0.110", "uvicorn[standard]>=0.27", "alembic>=1.13", "psycopg[binary]>=3.1", "python-dotenv>=1.0"]
 
 # ETL pipeline (per-customer extract -> bronze -> silver -> gold).
 # Required to run anything under etl/ + examples/penicor_demo.py.

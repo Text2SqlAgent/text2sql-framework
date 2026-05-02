@@ -10,6 +10,8 @@
 -- Idempotent.
 -- ============================================================================
 
+CREATE SCHEMA IF NOT EXISTS bronze;
+
 CREATE TABLE IF NOT EXISTS bronze.raw_customers (
   ingested_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
   source_record_id    TEXT NOT NULL,

@@ -128,17 +128,30 @@ COMMENT ON TABLE bronze.ac_visitas IS
 
 CREATE TABLE IF NOT EXISTS bronze.ac_stock (
     id_deposito      TEXT,
-    "Deposito"       TEXT,
+    deposito         TEXT,
     id_articulo      TEXT,
-    "Articulo"       TEXT,
-    "Cantidad"       TEXT,
-    "Cantidad_min"   TEXT,
-    "Con_Faltante"   TEXT,
+    articulo         TEXT,
+    cantidad         TEXT,
+    cantidad_min     TEXT,
+    con_faltante     TEXT,
     ingested_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     etl_batch_id     TEXT        NOT NULL,
     source_system    TEXT        NOT NULL DEFAULT 'altocontrol',
     source_record_id TEXT        NOT NULL
 );
+
+-- Rename quoted mixed-case columns from earlier schema versions
+DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'bronze' AND table_name = 'ac_stock'
+               AND column_name = 'Deposito') THEN
+        ALTER TABLE bronze.ac_stock RENAME COLUMN "Deposito"     TO deposito;
+        ALTER TABLE bronze.ac_stock RENAME COLUMN "Articulo"     TO articulo;
+        ALTER TABLE bronze.ac_stock RENAME COLUMN "Cantidad"     TO cantidad;
+        ALTER TABLE bronze.ac_stock RENAME COLUMN "Cantidad_min" TO cantidad_min;
+        ALTER TABLE bronze.ac_stock RENAME COLUMN "Con_Faltante" TO con_faltante;
+    END IF;
+END $$;
 COMMENT ON TABLE bronze.ac_stock IS
   'Inventory snapshot from AltoControl PBI_tabla_stock. Grain: one row per '
   '(deposito, articulo). Already denormalized (deposito + articulo names included). '
@@ -337,3 +350,19 @@ CREATE INDEX IF NOT EXISTS ac_pagos_ingested_at_idx             ON bronze.ac_pag
 CREATE INDEX IF NOT EXISTS ac_visitas_ingested_at_idx           ON bronze.ac_visitas (ingested_at);
 CREATE INDEX IF NOT EXISTS ac_stock_ingested_at_idx             ON bronze.ac_stock (ingested_at);
 CREATE INDEX IF NOT EXISTS ac_deuda_por_cliente_ingested_at_idx ON bronze.ac_deuda_por_cliente (ingested_at);
+
+-- Unique indexes for upsert (ON CONFLICT DO UPDATE)
+CREATE UNIQUE INDEX IF NOT EXISTS ac_ventas_uk            ON bronze.ac_ventas (id_renglon);
+CREATE UNIQUE INDEX IF NOT EXISTS ac_compras_uk           ON bronze.ac_compras (id_renglon);
+CREATE UNIQUE INDEX IF NOT EXISTS ac_pagos_uk             ON bronze.ac_pagos (id_pago);
+CREATE UNIQUE INDEX IF NOT EXISTS ac_visitas_uk           ON bronze.ac_visitas (id_visita);
+CREATE UNIQUE INDEX IF NOT EXISTS ac_stock_uk             ON bronze.ac_stock (id_deposito, id_articulo);
+CREATE UNIQUE INDEX IF NOT EXISTS ac_deuda_uk             ON bronze.ac_deuda_por_cliente (id_sucursal, id_documento);
+CREATE UNIQUE INDEX IF NOT EXISTS ac_articulos_uk         ON bronze.ac_articulos (id_articulo);
+CREATE UNIQUE INDEX IF NOT EXISTS ac_clientes_uk          ON bronze.ac_clientes (id_sucursal);
+CREATE UNIQUE INDEX IF NOT EXISTS ac_empresas_uk          ON bronze.ac_empresas (id_empresa);
+CREATE UNIQUE INDEX IF NOT EXISTS ac_geografia_uk         ON bronze.ac_geografia (id_pais, id_departamento);
+CREATE UNIQUE INDEX IF NOT EXISTS ac_proveedores_uk       ON bronze.ac_proveedores (id_proveedor);
+CREATE UNIQUE INDEX IF NOT EXISTS ac_ruta_uk              ON bronze.ac_ruta (id_ruta);
+CREATE UNIQUE INDEX IF NOT EXISTS ac_rutas_uk             ON bronze.ac_rutas (id_sucursal, id_ruta);
+CREATE UNIQUE INDEX IF NOT EXISTS ac_vendedores_uk        ON bronze.ac_vendedores (id_vendedor);

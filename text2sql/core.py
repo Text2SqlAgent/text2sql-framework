@@ -73,6 +73,7 @@ class TextSQL:
         api_key: str | None = None,
         api_url: str | None = None,
         enforce_read_only: bool = False,
+        schema: str | None = None,
     ):
         self.db = Database(connection_string)
 
@@ -121,6 +122,7 @@ class TextSQL:
             custom_metadata=metadata_hint,
             example_store=self.example_store,
             tracer=self.tracer,
+            fixed_schema=schema,
         )
 
 
@@ -131,6 +133,7 @@ class TextSQL:
         user_id: str | None = None,
         user_role: str | None = None,
         metadata: dict | None = None,
+        message_history: list[dict] | None = None,
     ) -> SQLResult:
         """Ask a natural language question. Returns SQL and results.
 
@@ -165,6 +168,7 @@ class TextSQL:
             user_id=user_id,
             user_role=user_role,
             metadata=metadata,
+            message_history=message_history,
         )
 
     def _run_canonical(

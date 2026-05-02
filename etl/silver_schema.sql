@@ -10,6 +10,8 @@
 -- Idempotent.
 -- ============================================================================
 
+CREATE SCHEMA IF NOT EXISTS silver;
+
 CREATE TABLE IF NOT EXISTS silver.customers (
   customer_code         TEXT PRIMARY KEY,
   customer_name         TEXT NOT NULL,
