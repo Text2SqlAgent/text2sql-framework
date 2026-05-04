@@ -8,6 +8,7 @@ from text2sql.canonical import CanonicalQueryStore
 from text2sql.connection import Database
 from text2sql.examples import ExampleStore
 from text2sql.generate import SQLGenerator, SQLResult
+from text2sql.semantic_cache import SemanticCache
 from text2sql.tracing import Tracer
 
 
@@ -76,6 +77,7 @@ class TextSQL:
         schema: str | None = None,
         model_light: str | None = None,
         model_heavy: str | None = None,
+        semantic_cache: SemanticCache | None = None,
     ):
         self.db = Database(connection_string)
 
@@ -106,6 +108,9 @@ class TextSQL:
                 canonical_queries,
                 match_threshold=canonical_threshold,
             )
+
+        # Optional semantic cache between canonical and agent paths.
+        self.semantic_cache = semantic_cache
 
         # Enable tracing if trace_file or api_key is set
         if trace_file or api_key:
@@ -153,7 +158,7 @@ class TextSQL:
             metadata: Optional free-form dict — recorded in traces. Useful for
                      correlating queries with sessions, requests, or tenants.
         """
-        # Try canonical match first
+        # Try canonical match first (vetted SQL templates, ~50ms)
         if self.canonical_store is not None:
             match = self.canonical_store.match(question)
             if match is not None:
@@ -166,7 +171,24 @@ class TextSQL:
                     metadata=metadata,
                 )
 
-        return self.generator.ask(
+        # Then try semantic cache (paraphrase of a previously-answered
+        # question). Re-execute the cached SQL against the live DB so data
+        # freshness is preserved — only the LLM-expensive synthesis is cached.
+        if self.semantic_cache is not None:
+            cached = self.semantic_cache.lookup(question)
+            if cached is not None:
+                return self._run_cached(
+                    question=question,
+                    cached=cached,
+                    max_rows=max_rows,
+                    user_id=user_id,
+                    user_role=user_role,
+                    metadata=metadata,
+                )
+
+        # Agent path. On success, store the SQL in the semantic cache for
+        # future paraphrased lookups.
+        result = self.generator.ask(
             question,
             max_rows=max_rows,
             user_id=user_id,
@@ -174,6 +196,9 @@ class TextSQL:
             metadata=metadata,
             message_history=message_history,
         )
+        if self.semantic_cache is not None and result.success and result.sql:
+            self.semantic_cache.store(question, result.sql)
+        return result
 
     def _run_canonical(
         self,
@@ -222,6 +247,59 @@ class TextSQL:
                 f"[canonical:{match.query.name} score={match.score:.2f}] "
                 + (match.query.description or "")
             ).strip(),
+            tool_calls_made=0,
+            iterations=0,
+            input_tokens=0,
+            output_tokens=0,
+        )
+
+    def _run_cached(
+        self,
+        question: str,
+        cached,
+        max_rows: int | None,
+        user_id: str | None,
+        user_role: str | None,
+        metadata: dict | None,
+    ) -> SQLResult:
+        """Execute a SQL pulled from the semantic cache, bypassing the LLM."""
+        if self.tracer:
+            self.tracer.start_query(question)
+            self.tracer.attach_user_context(
+                user_id=user_id,
+                user_role=user_role,
+                metadata=metadata,
+            )
+
+        sql = cached.sql
+        error = None
+        data: list = []
+        try:
+            rows = self.db.execute(sql)
+            if max_rows is not None:
+                rows = rows[:max_rows]
+            data = rows
+        except Exception as e:
+            error = f"Cached query execution failed: {e}"
+
+        if self.tracer:
+            self.tracer.end_query(
+                sql=sql,
+                success=error is None,
+                error=error,
+                iterations=0,
+            )
+
+        return SQLResult(
+            question=question,
+            sql=sql,
+            data=data,
+            error=error,
+            commentary=(
+                f"[semantic-cache hit on '{cached.question[:60]}'] "
+                f"(stored {int((__import__('time').time() - cached.created_at))}s ago, "
+                f"{cached.hit_count} prior hits)"
+            ),
             tool_calls_made=0,
             iterations=0,
             input_tokens=0,

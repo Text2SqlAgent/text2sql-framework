@@ -62,11 +62,19 @@ etl = [
 # repo root.
 studio = ["langgraph-cli[inmem]>=0.1"]
 
+# Semantic cache — paraphrase-aware reuse of agent-generated SQL between
+# canonical and agent paths. sentence-transformers ships PyTorch + a small
+# (~80MB) embedding model; opt-in via this extra. Enable at runtime with
+# TEXT2SQL_SEMANTIC_CACHE=true.
+cache = ["sentence-transformers>=2.7", "numpy>=1.24"]
+
 # Everything (kitchen sink — convenient for dev, heavier).
 all = [
     "langchain-openai>=0.3",
     "langchain-anthropic>=0.3",
     "langchain-openrouter>=0.1",
+    "sentence-transformers>=2.7",
+    "numpy>=1.24",
     "httpx>=0.27",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",

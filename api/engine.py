@@ -34,6 +34,8 @@ def build_engine() -> TextSQL:
             "TEXT2SQL_DB is required. "
             'Example: TEXT2SQL_DB="postgresql+psycopg://user:pass@localhost/db?options=-csearch_path%3Dgold"'
         )
+    semantic_cache = _build_semantic_cache()
+
     return TextSQL(
         connection_string=db,
         model=os.environ.get("TEXT2SQL_MODEL") or "anthropic:claude-sonnet-4-6",
@@ -47,4 +49,40 @@ def build_engine() -> TextSQL:
         trace_file=os.environ.get("TEXT2SQL_TRACES") or None,
         metadata_hint=os.environ.get("TEXT2SQL_METADATA_HINT") or None,
         enforce_read_only=os.environ.get("TEXT2SQL_ENFORCE_RO", "false").lower() in ("1", "true", "yes"),
+        semantic_cache=semantic_cache,
+    )
+
+
+def _build_semantic_cache():
+    """Build a SemanticCache from env vars, or return None if disabled / unavailable.
+
+    Reads:
+        TEXT2SQL_SEMANTIC_CACHE   = "true" / "1" / "yes" to enable.
+        TEXT2SQL_CACHE_THRESHOLD  = cosine threshold (default 0.93).
+        TEXT2SQL_CACHE_TTL        = seconds (default 3600).
+        TEXT2SQL_CACHE_MAX        = max entries (default 1000).
+
+    Returns None when disabled or when sentence-transformers isn't installed
+    (the cache is opt-in via the [cache] extra).
+    """
+    if os.environ.get("TEXT2SQL_SEMANTIC_CACHE", "false").lower() not in ("1", "true", "yes"):
+        return None
+
+    from text2sql.semantic_cache import SemanticCache, make_default_embedder
+
+    embedder = make_default_embedder()
+    if embedder is None:
+        import warnings
+        warnings.warn(
+            "TEXT2SQL_SEMANTIC_CACHE=true but sentence-transformers is not installed. "
+            "Install via `uv pip install -e \".[cache]\"` to enable. Cache disabled.",
+            stacklevel=2,
+        )
+        return None
+
+    return SemanticCache(
+        embedder=embedder,
+        threshold=float(os.environ.get("TEXT2SQL_CACHE_THRESHOLD", "0.93")),
+        ttl_seconds=int(os.environ.get("TEXT2SQL_CACHE_TTL", "3600")),
+        max_entries=int(os.environ.get("TEXT2SQL_CACHE_MAX", "1000")),
     )
