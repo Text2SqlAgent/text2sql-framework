@@ -13,14 +13,50 @@ the metadata queries we delegated to them, and the redundant exploration
 ballooned latency and tokens. Schema discovery is fast enough at the
 supervisor's tier; reintroduce a Light subagent only with a model that
 actually tool-uses reliably under our prompts.
+
+Anthropic prompt caching: when the user runs on direct Anthropic
+(provider='anthropic'), this module registers a provider-wide HarnessProfile
+that overrides deepagents' default 5-minute cache TTL with 1 hour. The
+extended cache writes are 2x normal input cost but cache reads are 90% off,
+so the break-even is ~2 hits per 1h window — comfortably reached by any
+real session. Anthropic silently dropped the default TTL from 1h to 5m on
+2026-03-06; explicit configuration is now required for the longer window.
+For OpenRouter-routed Anthropic models, the deepagents middleware no-ops
+(it only applies to ChatAnthropic instances), so this caching benefit
+requires the direct provider — set ANTHROPIC_API_KEY and use
+TEXT2SQL_MODEL=anthropic:claude-haiku-4.5.
 """
 
 from __future__ import annotations
 
-from deepagents import create_deep_agent as _deepagents_create
+from deepagents import (
+    HarnessProfile,
+    create_deep_agent as _deepagents_create,
+    register_harness_profile,
+)
+from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.messages import HumanMessage
 
 from text2sql.subagents import make_analyst
+
+
+# ---------------------------------------------------------------------------
+# Anthropic prompt-caching: register provider-wide HarnessProfile with TTL=1h
+# ---------------------------------------------------------------------------
+# deepagents auto-includes AnthropicPromptCachingMiddleware in the tail of
+# every agent's middleware stack. Its default TTL is 5 minutes; we override
+# to 1h here, which is the right setting for human-paced sessions where
+# requests can be minutes apart. Registration is global / process-wide, so
+# every TextSQL instance in this process picks it up automatically.
+def _register_anthropic_extended_cache() -> None:
+    profile = HarnessProfile(
+        excluded_middleware={"AnthropicPromptCachingMiddleware"},
+        extra_middleware=[AnthropicPromptCachingMiddleware(ttl="1h")],
+    )
+    register_harness_profile("anthropic", profile)
+
+
+_register_anthropic_extended_cache()
 
 
 def _get_chat_model(model_str: str):
