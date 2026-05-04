@@ -15,6 +15,7 @@ from text2sql.agent import create_deep_agent
 from text2sql.connection import Database
 from text2sql.dialects import get_dialect_guide
 from text2sql.examples import ExampleStore
+from text2sql.numeric_guard import format_warning, validate as validate_numbers
 from text2sql.tools import make_tools
 from text2sql.tracing import Tracer
 
@@ -371,6 +372,17 @@ class SQLGenerator:
                 data = rows
             except Exception as e:
                 error = f"Final execution failed: {e}"
+
+        # Hallucination guard: if the agent produced a narrative commentary
+        # alongside SQL results, verify every numeric token in the commentary
+        # is justified by the rows. Append a warning footer for unverified
+        # numbers — don't strip them, the user gets to see both the claim and
+        # the warning. The check is deterministic (regex + arithmetic), so it
+        # introduces no extra LLM cost or hallucination surface.
+        if commentary and data and not error:
+            unverified = validate_numbers(commentary, data)
+            if unverified:
+                commentary = commentary + format_warning(unverified)
 
         if self.tracer:
             self.tracer.end_query(
