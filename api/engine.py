@@ -37,6 +37,11 @@ def build_engine() -> TextSQL:
     return TextSQL(
         connection_string=db,
         model=os.environ.get("TEXT2SQL_MODEL") or "anthropic:claude-sonnet-4-6",
+        # Optional tier overrides — when set, the supervisor (model=) delegates
+        # schema discovery to model_light and narrative rendering to model_heavy.
+        # If both are unset, the agent runs single-tier on `model`.
+        model_light=os.environ.get("TEXT2SQL_MODEL_LIGHT") or None,
+        model_heavy=os.environ.get("TEXT2SQL_MODEL_HEAVY") or None,
         canonical_queries=os.environ.get("TEXT2SQL_CANONICAL") or None,
         examples=os.environ.get("TEXT2SQL_SCENARIOS") or None,
         trace_file=os.environ.get("TEXT2SQL_TRACES") or None,

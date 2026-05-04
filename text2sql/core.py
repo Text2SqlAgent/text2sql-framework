@@ -74,6 +74,8 @@ class TextSQL:
         api_url: str | None = None,
         enforce_read_only: bool = False,
         schema: str | None = None,
+        model_light: str | None = None,
+        model_heavy: str | None = None,
     ):
         self.db = Database(connection_string)
 
@@ -123,6 +125,8 @@ class TextSQL:
             example_store=self.example_store,
             tracer=self.tracer,
             fixed_schema=schema,
+            model_light=model_light,
+            model_heavy=model_heavy,
         )
 
 

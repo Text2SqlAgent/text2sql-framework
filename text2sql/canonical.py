@@ -170,13 +170,28 @@ class CanonicalQueryStore:
         )
 
     def match(self, question: str) -> Optional[CanonicalMatch]:
-        """Return the best canonical match for a question, or None if below threshold."""
+        """Return the best canonical match for a question, or None if below threshold.
+
+        Scoring uses a balanced overlap formula:
+            score = overlap / max(|q_tokens|, MIN_QUESTION_TOKENS)
+        This caps the denominator-shrinking effect that previously let any
+        single non-stopword token in the question yield a perfect 1.00 score
+        against an alias set that happened to include that token. We also
+        require >= 2 overlapping tokens for any match — single-keyword
+        questions don't auto-route.
+        """
         if not self.queries:
             return None
 
         q_tokens = {t for t in _tokenize(question) if t not in _STOPWORDS}
         if not q_tokens:
             return None
+
+        # Effective denominator floor — prevents very short questions
+        # ("how many X?") from auto-scoring 1.00 on any single-token overlap.
+        # With MIN_DENOMINATOR=3, a single-token question caps at 1/3 = 0.33
+        # which falls below the default 0.6 threshold and routes to the agent.
+        MIN_DENOMINATOR = 3
 
         best: Optional[CanonicalMatch] = None
         for cq in self.queries:
@@ -186,8 +201,8 @@ class CanonicalQueryStore:
             overlap = q_tokens & cq_tokens
             if not overlap:
                 continue
-            # Score = overlap / min(|q|, |cq|). Coverage of the smaller set.
-            score = len(overlap) / min(len(q_tokens), len(cq_tokens))
+            denom = max(len(q_tokens), MIN_DENOMINATOR)
+            score = len(overlap) / denom
             if best is None or score > best.score:
                 best = CanonicalMatch(query=cq, score=score, matched_tokens=overlap)
 

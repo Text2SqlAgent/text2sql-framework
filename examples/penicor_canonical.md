@@ -42,20 +42,29 @@ LIMIT 50
 ```
 
 ## top_customers_by_revenue
-aliases: top customers, biggest customers, best customers, mejores clientes, top clientes, principales clientes, clientes que mas compran
+aliases: top customers, biggest customers, best customers, top customers by revenue, mejores clientes, top clientes, principales clientes, clientes que mas compran, top clientes por ingresos
 description: Top 10 customers by net revenue across the loaded period.
 
 ```sql
 SELECT
   customer_name,
-  sales_zone,
   ROUND(net_cents / 100.0, 2) AS net_revenue,
   invoice_count,
   units_sold,
+  source_branch_count,
   last_sale_date
 FROM gold.v_revenue_by_customer
 ORDER BY net_cents DESC
 LIMIT 10
+```
+
+## customer_count
+aliases: how many customers, total customers, number of customers, count customers, cuantos clientes, total de clientes, numero de clientes
+description: Total count of canonical (deduped) active customers.
+
+```sql
+SELECT COUNT(*) AS customer_count
+FROM gold.v_customers
 ```
 
 ## top_products
