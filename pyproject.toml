@@ -42,7 +42,7 @@ openrouter = ["langchain-openrouter>=0.1"]
 
 # Service / infra extras
 dashboard = ["httpx>=0.27"]
-api       = ["fastapi>=0.110", "uvicorn[standard]>=0.27", "alembic>=1.13", "psycopg[binary]>=3.1", "python-dotenv>=1.0"]
+api       = ["fastapi>=0.110", "uvicorn[standard]>=0.27", "alembic>=1.13", "psycopg[binary]>=3.1", "python-dotenv>=1.0", "sse-starlette>=2.1"]
 
 # ETL pipeline (per-customer extract -> bronze -> silver -> gold).
 # Required to run anything under etl/ + examples/penicor_demo.py.
@@ -78,6 +78,7 @@ all = [
     "httpx>=0.27",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
+    "sse-starlette>=2.1",
     "pyodbc>=5.0",
     "pandas>=2.0",
     "psycopg[binary]>=3.1",
