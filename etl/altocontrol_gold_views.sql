@@ -502,3 +502,98 @@ ORDER BY shortfall DESC;
 COMMENT ON VIEW gold.v_inventory_low IS
   'Products currently below their minimum stock threshold, ordered by '
   'biggest shortfall first.';
+
+
+-- ============================================================================
+-- COMMENT ON COLUMN — single highest-ROI lever for agent accuracy.
+-- The agent reads pg_description via information_schema; well-commented
+-- columns dramatically reduce ambiguity (signed_* vs raw, canonical vs source,
+-- cents vs display units).
+-- ============================================================================
+
+-- ---------------- gold.v_sales
+COMMENT ON COLUMN gold.v_sales.canonical_customer_id IS 'Canonical (deduped) customer entity id. Use this for GROUP BY when ranking or aggregating customers.';
+COMMENT ON COLUMN gold.v_sales.customer_name        IS 'Canonical customer name (deduped). For display in tables/reports.';
+COMMENT ON COLUMN gold.v_sales.customer_branch_id   IS 'Source-system id_sucursal — one per physical branch. NOT for aggregation; use canonical_customer_id instead.';
+COMMENT ON COLUMN gold.v_sales.canonical_product_id IS 'Canonical (deduped) product entity id. Use for GROUP BY when ranking products.';
+COMMENT ON COLUMN gold.v_sales.product_name         IS 'Canonical product name (deduped).';
+COMMENT ON COLUMN gold.v_sales.canonical_salesperson_id IS 'Canonical salesperson id (deduped).';
+COMMENT ON COLUMN gold.v_sales.salesperson_name     IS 'Canonical salesperson name.';
+COMMENT ON COLUMN gold.v_sales.fecha                IS 'Transaction date. For period filtering use DATE_TRUNC, EXTRACT(QUARTER FROM fecha), etc.';
+COMMENT ON COLUMN gold.v_sales.affects_sale         IS 'Sign multiplier: 1 for sales, -1 for credit notes/returns. Already applied to signed_* columns.';
+COMMENT ON COLUMN gold.v_sales.currency_code        IS 'Transaction currency (UYU is base; some rows are USD). Always GROUP BY this when aggregating across currencies.';
+COMMENT ON COLUMN gold.v_sales.exchange_rate        IS 'Source cotizacion. Multiply *_cents by this to convert to UYU. For UYU rows, exchange_rate = 1.';
+COMMENT ON COLUMN gold.v_sales.net_cents            IS 'Net amount in line currency cents (excluding tax). RAW — do NOT use in SUM across mixed sale/credit-note rows; use signed_net_cents.';
+COMMENT ON COLUMN gold.v_sales.total_cents          IS 'Total amount in line currency cents (including tax). RAW — use signed_total_cents in SUMs.';
+COMMENT ON COLUMN gold.v_sales.signed_net_cents     IS 'net_cents * affects_sale. USE THIS in SUM aggregations so credit notes net out correctly.';
+COMMENT ON COLUMN gold.v_sales.signed_total_cents   IS 'total_cents * affects_sale. Use in SUM for tax-inclusive net revenue.';
+COMMENT ON COLUMN gold.v_sales.signed_quantity      IS 'quantity * affects_sale. Use in SUM for net units sold (returns subtract).';
+
+-- ---------------- gold.v_purchases
+COMMENT ON COLUMN gold.v_purchases.canonical_supplier_id IS 'Canonical (deduped) supplier entity id.';
+COMMENT ON COLUMN gold.v_purchases.supplier_name    IS 'Canonical supplier name.';
+COMMENT ON COLUMN gold.v_purchases.signed_total_cents IS 'total_cents * affects_sale (sale-side sign). Use in SUM for net purchases (purchase returns subtract).';
+COMMENT ON COLUMN gold.v_purchases.signed_net_cents IS 'net_cents * affects_sale. Tax-exclusive net purchases.';
+
+-- ---------------- gold.v_payments
+COMMENT ON COLUMN gold.v_payments.canonical_customer_id IS 'Canonical customer id who made the payment.';
+COMMENT ON COLUMN gold.v_payments.affects_ar        IS '1 for collection, -1 for refund/reversal. Already applied in signed_amount_cents.';
+COMMENT ON COLUMN gold.v_payments.amount_cents      IS 'Gross payment amount in cents. RAW — use signed_amount_cents in SUMs.';
+COMMENT ON COLUMN gold.v_payments.signed_amount_cents IS 'amount_cents * affects_ar. Use in SUM for net collections.';
+
+-- ---------------- gold.v_open_ar
+COMMENT ON COLUMN gold.v_open_ar.canonical_customer_id IS 'Canonical customer who owes this document.';
+COMMENT ON COLUMN gold.v_open_ar.outstanding_cents  IS 'Amount still owed (cents). View already filters outstanding_cents > 0.';
+COMMENT ON COLUMN gold.v_open_ar.due_date           IS 'Date the document was due. Negative days_overdue = future-due.';
+COMMENT ON COLUMN gold.v_open_ar.days_overdue       IS 'CURRENT_DATE - due_date. Positive = past due, 0 = due today, negative = not yet due.';
+COMMENT ON COLUMN gold.v_open_ar.cfe_document       IS 'Uruguayan e-fiscal document number (CFE). The legally-binding invoice id, distinct from internal document_id.';
+
+-- ---------------- gold.v_revenue_by_customer
+COMMENT ON COLUMN gold.v_revenue_by_customer.canonical_customer_id IS 'Canonical customer id (deduped); the grain of this view.';
+COMMENT ON COLUMN gold.v_revenue_by_customer.customer_name    IS 'Canonical customer name for display.';
+COMMENT ON COLUMN gold.v_revenue_by_customer.net_cents        IS 'Lifetime net revenue in cents (already nets credit notes via signed_net_cents). Divide by 100 for display.';
+COMMENT ON COLUMN gold.v_revenue_by_customer.total_cents      IS 'Lifetime tax-inclusive revenue in cents. Already nets credit notes.';
+COMMENT ON COLUMN gold.v_revenue_by_customer.source_branch_count IS 'How many source-system customer_branch_id rows roll up into this canonical entity. >1 means multi-branch chain (e.g., supermarket).';
+COMMENT ON COLUMN gold.v_revenue_by_customer.invoice_count    IS 'Distinct invoice count across all branches for this canonical customer.';
+
+-- ---------------- gold.v_revenue_by_product
+COMMENT ON COLUMN gold.v_revenue_by_product.canonical_product_id IS 'Canonical product id (deduped); grain of this view.';
+COMMENT ON COLUMN gold.v_revenue_by_product.units_sold        IS 'Net units sold (signed_quantity sum, returns subtract).';
+COMMENT ON COLUMN gold.v_revenue_by_product.distinct_customers IS 'Number of distinct CANONICAL customers who bought this product.';
+
+-- ---------------- gold.v_revenue_by_salesperson
+COMMENT ON COLUMN gold.v_revenue_by_salesperson.canonical_salesperson_id IS 'Canonical salesperson id; grain of this view.';
+COMMENT ON COLUMN gold.v_revenue_by_salesperson.distinct_customers IS 'Number of distinct CANONICAL customers this rep sold to.';
+
+-- ---------------- gold.v_revenue_monthly
+COMMENT ON COLUMN gold.v_revenue_monthly.month            IS 'First day of the month (DATE_TRUNC). Group time series by this column.';
+COMMENT ON COLUMN gold.v_revenue_monthly.active_customers IS 'Distinct CANONICAL customers with at least one sale in this month.';
+
+-- ---------------- gold.v_payments_monthly
+COMMENT ON COLUMN gold.v_payments_monthly.amount_cents      IS 'Net collections this month (already applies affects_ar sign).';
+COMMENT ON COLUMN gold.v_payments_monthly.paying_customers  IS 'Distinct CANONICAL customers who made a payment this month.';
+
+-- ---------------- gold.v_ar_aging
+COMMENT ON COLUMN gold.v_ar_aging.canonical_customer_id   IS 'Canonical customer id; one row per (customer, currency) combo.';
+COMMENT ON COLUMN gold.v_ar_aging.not_yet_due_cents       IS 'Open AR with due_date >= today.';
+COMMENT ON COLUMN gold.v_ar_aging.overdue_1_30_cents      IS 'Open AR 1-30 days past due_date.';
+COMMENT ON COLUMN gold.v_ar_aging.overdue_31_60_cents     IS 'Open AR 31-60 days past due_date.';
+COMMENT ON COLUMN gold.v_ar_aging.overdue_60_plus_cents   IS 'Open AR 60+ days past due_date — the worst-aged bucket.';
+COMMENT ON COLUMN gold.v_ar_aging.total_owed_cents        IS 'Sum of all aging buckets (total open AR for this customer/currency).';
+COMMENT ON COLUMN gold.v_ar_aging.max_days_overdue        IS 'Worst single-document overdue count. Useful for "most overdue customer" queries.';
+
+-- ---------------- gold.v_ar_total
+COMMENT ON COLUMN gold.v_ar_total.total_owed_cents       IS 'Total open AR for this currency (sum across all customers).';
+COMMENT ON COLUMN gold.v_ar_total.customers_with_balance IS 'Distinct CANONICAL customers with any open AR balance.';
+
+-- ---------------- gold.v_inventory
+COMMENT ON COLUMN gold.v_inventory.canonical_product_id IS 'Canonical product id (deduped).';
+COMMENT ON COLUMN gold.v_inventory.is_understocked      IS 'Source flag: TRUE when quantity < min_quantity. Many products have min_quantity=0 in source data, so this may be sparse.';
+COMMENT ON COLUMN gold.v_inventory.shortfall            IS 'GREATEST(min_quantity - quantity, 0). Positive = how many units short of minimum.';
+
+-- ---------------- gold.v_customers
+COMMENT ON COLUMN gold.v_customers.canonical_customer_id  IS 'Canonical customer id (deduped legal entity).';
+COMMENT ON COLUMN gold.v_customers.customer_name          IS 'Canonical (deduped) display name.';
+COMMENT ON COLUMN gold.v_customers.entity_kind            IS '''legal_entity'' (default) or ''group'' (if a parent rollup row).';
+COMMENT ON COLUMN gold.v_customers.canonical_parent_id    IS 'Self-FK to a parent canonical_customer_id (group). Currently NULL for all Penicor customers.';
+COMMENT ON COLUMN gold.v_customers.source_branch_count    IS 'How many source customer_branch_id rows map to this canonical entity.';
