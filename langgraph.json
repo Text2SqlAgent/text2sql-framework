@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "penicor": "./studio_graph.py:graph"
+  },
+  "env": ".env"
+}

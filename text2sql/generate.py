@@ -15,6 +15,7 @@ from text2sql.agent import create_deep_agent
 from text2sql.connection import Database
 from text2sql.dialects import get_dialect_guide
 from text2sql.examples import ExampleStore
+from text2sql.numeric_guard import format_warning, validate as validate_numbers
 from text2sql.tools import make_tools
 from text2sql.tracing import Tracer
 
@@ -42,6 +43,36 @@ class SQLResult:
             return f"Error: {self.error}\nSQL: {self.sql}"
         return f"SQL: {self.sql}\n({len(self.data)} rows)"
 
+    def to_dict_list(self) -> list[dict]:
+        """Return rows as a list of plain dicts (data is already this shape;
+        this is the explicit accessor)."""
+        return list(self.data)
+
+    def to_csv(self, path: str, encoding: str = "utf-8") -> str:
+        """Write rows to a CSV file. Returns the path written.
+
+        Useful for "generate an expense report" workflows where the caller
+        wants a file artifact, not just a list of dicts.
+        """
+        import csv
+        from pathlib import Path
+
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+
+        if not self.data:
+            # Still create an empty file with a header line if we know the SQL,
+            # otherwise just an empty file.
+            out.write_text("", encoding=encoding)
+            return str(out)
+
+        fieldnames = list(self.data[0].keys())
+        with open(out, "w", newline="", encoding=encoding) as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(self.data)
+        return str(out)
+
 
 SYSTEM_PROMPT = """You are a SQL expert. Translate natural language questions into SQL queries.
 
@@ -52,21 +83,47 @@ This is a **{dialect}** database.
 ## Tools
 
 - `execute_sql` — run any read-only SQL (SELECT, WITH, SHOW, DESCRIBE, PRAGMA). Use this to explore the schema metadata and test queries. Use LIMIT to keep result sets under 100 rows when possible.
-{example_tool_note}
+{example_tool_note}{subagent_tool_note}
 ## Workflow
 
-1. EXPLORE: Query the schema metadata (see above) to find relevant tables and columns
+1. EXPLORE: Query the schema metadata (see above) to find relevant tables and columns{schema_explorer_step}
    - Search by keyword: filter table/column names with LIKE or ILIKE
    - Look at column descriptions/comments if available
 2. INSPECT: Query full column lists for candidate tables to see exact names and types
 3. RELATIONSHIPS: Query foreign keys to find how tables join
 4. EXAMPLES: If the question involves a business concept you're unsure about, use `lookup_example` to get guidance{example_list_note}
 5. WRITE & EXECUTE: Write your SQL and execute it to verify it works
-6. FIX: If it errors, read the error, fix, and re-execute
+6. FIX: If it errors, read the error, fix, and re-execute{analyst_step}
 
 ## Rules
 - ALWAYS explore the schema first — never guess table or column names
 - Use exact names from the metadata catalog
+- Write {dialect} SQL syntax
+- You MUST execute your final SQL via `execute_sql` before responding. Never return SQL you haven't run.
+- If execution fails, read the error, fix the SQL, and execute again. Repeat until it works.
+- Once the query executes successfully, your final response MUST include the SQL inside a ```sql code block. You may include brief commentary outside the code block if helpful. The results are captured automatically and displayed to the user separately.
+{instructions}"""
+
+SYSTEM_PROMPT_FIXED_SCHEMA = """You are a SQL expert. Translate natural language questions into SQL queries.
+
+This is a **{dialect}** database.
+
+## Schema
+{schema_section}
+{custom_metadata}
+## Tools
+
+- `execute_sql` — run any read-only SQL (SELECT, WITH, SHOW, DESCRIBE, PRAGMA). Use this to test queries. Use LIMIT to keep result sets under 100 rows when possible.
+{example_tool_note}{subagent_tool_note}
+## Workflow
+
+1. PLAN: Identify the relevant tables and columns from the schema provided above
+2. EXAMPLES: If the question involves a business concept you're unsure about, use `lookup_example` to get guidance{example_list_note}
+3. WRITE & EXECUTE: Write your SQL and execute it to verify it works
+4. FIX: If it errors, read the error, fix, and re-execute{analyst_step}
+
+## Rules
+- Use the schema provided above — use exact table and column names from it
 - Write {dialect} SQL syntax
 - You MUST execute your final SQL via `execute_sql` before responding. Never return SQL you haven't run.
 - If execution fails, read the error, fix the SQL, and execute again. Repeat until it works.
@@ -85,13 +142,19 @@ class SQLGenerator:
         custom_metadata: str | None = None,
         example_store: ExampleStore | None = None,
         tracer: Tracer | None = None,
+        fixed_schema: str | None = None,
+        model_light: str | None = None,
+        model_heavy: str | None = None,
     ):
         self.db = db
         self.model = model
+        self.model_light = model_light
+        self.model_heavy = model_heavy
         self.instructions = instructions
         self.custom_metadata = custom_metadata
         self.example_store = example_store
         self.tracer = tracer
+        self.fixed_schema = fixed_schema
 
         self.tools = make_tools(db, example_store)
         self.system_prompt = self._build_system_prompt()
@@ -100,11 +163,12 @@ class SQLGenerator:
             model=model,
             tools=self.tools,
             system_prompt=self.system_prompt,
+            model_light=model_light,
+            model_heavy=model_heavy,
         )
 
     def _build_system_prompt(self) -> str:
         dialect = self.db.dialect
-        dialect_guide = get_dialect_guide(dialect)
 
         custom = ""
         if self.custom_metadata:
@@ -122,6 +186,45 @@ class SQLGenerator:
             if scenarios:
                 example_list_note = "\n   Available examples: {}".format(", ".join(scenarios))
 
+        # Subagent-aware additions to the prompt. Only the analyst (Heavy tier)
+        # is wired today; the schema_explorer prototype was removed on 2026-05-04
+        # because cheap models hallucinated schemas instead of running metadata
+        # queries (see text2sql/agent.py).
+        subagent_tool_note = ""
+        schema_explorer_step = ""
+        analyst_step = ""
+
+        if self.model_heavy:
+            subagent_tool_note += (
+                "- `task` (subagent_type='analyst') — delegate narrative/interpretation to a "
+                "stronger subagent AFTER successful SQL execution. Use it when the user asked "
+                "for a formatted report, a multi-row table that needs interpretation, an insight, "
+                "or any answer where business commentary matters. Skip it for simple factual "
+                "questions ('how many X?', 'what's the total?'). When you call it, pass: the "
+                "original user question, the SQL you ran, the result rows as a markdown table, "
+                "and any business context.\n"
+            )
+            analyst_step = (
+                "\n7. RENDER (when commentary or interpretation is needed): delegate to the "
+                "`analyst` subagent via the `task` tool. Use its output as your final commentary "
+                "(outside the ```sql block). Skip this step for simple factual answers."
+            )
+
+        # Use fixed schema prompt if schema is provided
+        if self.fixed_schema:
+            return SYSTEM_PROMPT_FIXED_SCHEMA.format(
+                dialect=dialect,
+                schema_section=self.fixed_schema,
+                custom_metadata=custom,
+                instructions=instructions,
+                example_tool_note=example_tool_note,
+                example_list_note=example_list_note,
+                subagent_tool_note=subagent_tool_note,
+                analyst_step=analyst_step,
+            )
+
+        # Use default prompt with schema exploration
+        dialect_guide = get_dialect_guide(dialect)
         return SYSTEM_PROMPT.format(
             dialect=dialect,
             dialect_guide=dialect_guide,
@@ -129,27 +232,49 @@ class SQLGenerator:
             instructions=instructions,
             example_tool_note=example_tool_note,
             example_list_note=example_list_note,
+            subagent_tool_note=subagent_tool_note,
+            schema_explorer_step=schema_explorer_step,
+            analyst_step=analyst_step,
         )
 
-    def ask(self, question: str, max_rows: int | None = None) -> SQLResult:
+    def ask(
+        self,
+        question: str,
+        max_rows: int | None = None,
+        user_id: str | None = None,
+        user_role: str | None = None,
+        metadata: dict | None = None,
+        message_history: list[dict] | None = None,
+    ) -> SQLResult:
         if self.tracer:
             self.tracer.start_query(question)
+            self.tracer.attach_user_context(
+                user_id=user_id,
+                user_role=user_role,
+                metadata=metadata,
+            )
 
-        result = self.agent.invoke(
-            {"messages": [{"role": "user", "content": question}]}
-        )
+        # Prepend prior conversation turns so the agent has multi-turn context
+        messages = list(message_history or []) + [{"role": "user", "content": question}]
+        result = self.agent.invoke({"messages": messages})
 
         return self._parse_result(question, result["messages"], max_rows=max_rows)
 
     def _parse_result(self, question: str, messages: list, max_rows: int | None = None) -> SQLResult:
         """Extract SQL from the agent's final text response, then execute it.
 
-        The agent is instructed to respond with ONLY the final SQL in its last
-        message (no tool calls). We parse that SQL out and execute it ourselves,
-        giving the caller control over max_rows.
+        The agent is instructed to respond with the final SQL in a ```sql block
+        in its last message. We parse that SQL out and execute it ourselves,
+        giving the caller control over max_rows. If the agent answers
+        conversationally (no SQL block) we fall back to the SQL from its last
+        successful execute_sql tool call — that's effectively what produced the
+        answer anyway, so re-running it is the right thing to do.
         """
         tool_calls_made = 0
         args_by_id: dict[str, dict] = {}
+        # Track the last execute_sql call's SQL as a fallback when the final
+        # message doesn't include a ```sql block.
+        last_executed_sql: str = ""
         # Track message timestamps for computing LLM think time vs tool execution time
         last_ai_timestamp = self.tracer._current.start_time if self.tracer and self.tracer._current else 0.0
 
@@ -182,6 +307,10 @@ class SQLGenerator:
                 for tc in msg.tool_calls:
                     tool_calls_made += 1
                     args_by_id[tc["id"]] = tc["args"]
+                    if tc.get("name") == "execute_sql":
+                        sql_arg = tc["args"].get("sql") or tc["args"].get("query") or ""
+                        if sql_arg:
+                            last_executed_sql = sql_arg
 
                 # This AI message represents LLM thinking — record the timestamp
                 if msg_time:
@@ -223,6 +352,12 @@ class SQLGenerator:
                 )
             final_sql, commentary = _extract_sql_from_response(str(final_text))
 
+        if not final_sql and last_executed_sql:
+            # Fallback: agent answered conversationally without re-pasting the
+            # SQL it ran. Use the last successful execute_sql call. The
+            # commentary keeps whatever prose the agent produced.
+            final_sql = last_executed_sql
+
         if not final_sql:
             final_text = messages[-1].content if messages else ""
             error = f"No SQL produced. Response: {str(final_text)[:300]}"
@@ -237,6 +372,17 @@ class SQLGenerator:
                 data = rows
             except Exception as e:
                 error = f"Final execution failed: {e}"
+
+        # Hallucination guard: if the agent produced a narrative commentary
+        # alongside SQL results, verify every numeric token in the commentary
+        # is justified by the rows. Append a warning footer for unverified
+        # numbers — don't strip them, the user gets to see both the claim and
+        # the warning. The check is deterministic (regex + arithmetic), so it
+        # introduces no extra LLM cost or hallucination surface.
+        if commentary and data and not error:
+            unverified = validate_numbers(commentary, data)
+            if unverified:
+                commentary = commentary + format_warning(unverified)
 
         if self.tracer:
             self.tracer.end_query(

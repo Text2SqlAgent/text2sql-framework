@@ -123,6 +123,15 @@ class QueryTrace:
     input_tokens: int = 0
     output_tokens: int = 0
 
+    # User context (for audit trail)
+    user_id: Optional[str] = None
+    user_role: Optional[str] = None
+    user_metadata: Dict = field(default_factory=dict)
+
+    # Canonical query short-circuit (set when a vetted SQL template ran)
+    canonical_query: Optional[str] = None
+    canonical_score: float = 0.0
+
     def to_dict(self):
         return asdict(self)
 
@@ -296,6 +305,26 @@ class Tracer:
         )
         self._last_event_time = now
         self._tool_start_time = 0.0
+
+    def attach_user_context(self, user_id=None, user_role=None, metadata=None):
+        # type: (Optional[str], Optional[str], Optional[Dict]) -> None
+        """Attach caller identity to the in-flight trace (for audit logging)."""
+        if not self._current:
+            return
+        if user_id is not None:
+            self._current.user_id = user_id
+        if user_role is not None:
+            self._current.user_role = user_role
+        if metadata:
+            self._current.user_metadata.update(metadata)
+
+    def mark_canonical(self, name, score):
+        # type: (str, float) -> None
+        """Record that a canonical query short-circuit handled this question."""
+        if not self._current:
+            return
+        self._current.canonical_query = name
+        self._current.canonical_score = round(float(score), 3)
 
     def record_tool_start(self):
         # type: () -> None
@@ -639,5 +668,10 @@ def _dict_to_query_trace(data):
         llm_reasoning_steps=reasoning,
         input_tokens=data.get("input_tokens", 0),
         output_tokens=data.get("output_tokens", 0),
+        user_id=data.get("user_id"),
+        user_role=data.get("user_role"),
+        user_metadata=data.get("user_metadata") or {},
+        canonical_query=data.get("canonical_query"),
+        canonical_score=data.get("canonical_score", 0.0),
     )
     return trace

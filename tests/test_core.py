@@ -218,3 +218,40 @@ class TestDialects:
     def test_unknown_fallback(self):
         guide = get_dialect_guide("some_exotic_db")
         assert "information_schema" in guide
+
+
+class TestFixedSchema:
+    def test_fixed_schema_in_prompt(self, sample_db):
+        """Test that fixed_schema is embedded in the system prompt."""
+        from text2sql.generate import SQLGenerator
+
+        schema_text = "## Tables\n- customers: (id, name, email)\n- orders: (id, customer_id, total)"
+        gen = SQLGenerator(db=sample_db, fixed_schema=schema_text)
+
+        # Schema should be in the prompt
+        assert schema_text in gen.system_prompt
+        # Fixed schema prompt should not have the schema exploration step
+        assert "EXPLORE" not in gen.system_prompt
+        assert "PLAN" in gen.system_prompt
+
+    def test_no_schema_uses_default_prompt(self, sample_db):
+        """Test that default behavior is unchanged when schema is not provided."""
+        from text2sql.generate import SQLGenerator
+
+        gen = SQLGenerator(db=sample_db)
+
+        # Default prompt should have schema exploration
+        assert "EXPLORE" in gen.system_prompt
+        assert "PLAN" not in gen.system_prompt
+
+    def test_text_sql_schema_param(self, sample_db):
+        """Test that TextSQL accepts schema parameter and passes it through."""
+        from text2sql.core import TextSQL
+
+        schema_text = "## Tables\n- customers: (id, name, email)"
+        engine = TextSQL(
+            connection_string="sqlite:///:memory:",
+            schema=schema_text,
+        )
+
+        assert schema_text in engine.generator.system_prompt
