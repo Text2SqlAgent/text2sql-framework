@@ -197,7 +197,18 @@ SELECT DISTINCT ON (TRIM(id_renglon))
     NULLIF(TRIM(valor_medida), '')::NUMERIC(12,3),
     NULLIF(TRIM(volumen), '')::NUMERIC(12,3),
     NULLIF(TRIM(cantidad), '')::NUMERIC(12,3),
-    NULLIF(TRIM(cajones), '')::NUMERIC(12,3),
+    -- AltoControl artifact: for non-case-priced items (kg, each), cajones is
+    -- often duplicated from cantidad. NULL when they match so SUM(cases) only
+    -- aggregates real case-pack data (CS unit_of_measure items).
+    NULLIF(
+      CASE
+        WHEN NULLIF(TRIM(cajones), '')::NUMERIC(12,3)
+             = NULLIF(TRIM(cantidad), '')::NUMERIC(12,3)
+        THEN NULL
+        ELSE NULLIF(TRIM(cajones), '')::NUMERIC(12,3)
+      END,
+      0
+    ),
     (NULLIF(TRIM(preciolista), '')::NUMERIC * 100)::BIGINT,
     (NULLIF(TRIM(preciounitario), '')::NUMERIC * 100)::BIGINT,
     (NULLIF(TRIM(subtotal), '')::NUMERIC * 100)::BIGINT,
