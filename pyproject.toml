@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "text2sql"
-version = "0.2.0"
+version = "0.3.0"
 description = "Text-to-SQL framework with tool-based schema retrieval. Built on LangChain's Deep Agents harness."
 readme = "README.md"
 license = "MIT"
