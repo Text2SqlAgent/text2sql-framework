@@ -468,7 +468,7 @@ class Tracer:
         except ImportError:
             logger.warning(
                 "httpx not installed — cannot sync traces to dashboard. "
-                "Install with: pip install text2sql-agent[dashboard]"
+                "Install with: pip install text2sql-framework[dashboard]"
             )
             self._sync_buffer.clear()
             return
