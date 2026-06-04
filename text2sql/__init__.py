@@ -7,3 +7,9 @@ from text2sql.tracing import Tracer
 
 __version__ = "0.2.0"
 __all__ = ["TextSQL", "Database", "SQLResult", "Tracer"]
+
+try:
+    from text2sql.middleware import Text2SqlMiddleware
+    __all__.append("Text2SqlMiddleware")
+except ImportError:
+    pass

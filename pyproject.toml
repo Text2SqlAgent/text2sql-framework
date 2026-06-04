@@ -39,7 +39,8 @@ dependencies = [
 openai = ["langchain-openai>=0.3"]
 anthropic = ["langchain-anthropic>=0.3"]
 dashboard = ["httpx>=0.27"]
-all = ["langchain-openai>=0.3", "langchain-anthropic>=0.3", "httpx>=0.27"]
+langchain = ["langchain>=1.0"]
+all = ["langchain-openai>=0.3", "langchain-anthropic>=0.3", "httpx>=0.27", "langchain>=1.0"]
 dev = ["pytest>=7.0"]
 
 [project.scripts]
