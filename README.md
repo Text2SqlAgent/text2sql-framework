@@ -193,6 +193,36 @@ text2sql query "sqlite:///mydb.db" "How many orders per month?"
 text2sql ask "postgresql://localhost/mydb" --model anthropic:claude-sonnet-4-6
 ```
 
+## Use with LangChain agents
+
+If you're already building an agent with LangChain's `create_agent`, you can plug text2sql in as middleware instead of using the standalone `TextSQL` class. The middleware adds an `execute_sql` tool, dialect-aware schema-exploration guidance to the system prompt, and (optionally) a `lookup_example` tool wired to your scenarios file.
+
+```bash
+pip install "text2sql[langchain,anthropic]"
+```
+
+```python
+from langchain.agents import create_agent
+from text2sql import Text2SqlMiddleware
+
+t2s = Text2SqlMiddleware(
+    db_url="postgresql://user:pass@localhost/mydb",
+    examples="scenarios.md",          # optional
+    instructions="Revenue is net of refunds.",  # optional
+)
+
+agent = create_agent(
+    model="anthropic:claude-sonnet-4-6",
+    tools=t2s.tools,
+    middleware=[t2s],
+)
+
+result = agent.invoke({"messages": [{"role": "user", "content": "Top 5 customers by revenue?"}]})
+print(result["messages"][-1].content)
+```
+
+The middleware requires `langchain>=1.0`. A runnable example lives at [`examples/with_langchain.py`](examples/with_langchain.py).
+
 ## Built on Deep Agents
 
 The agent loop is powered by [Deep Agents](https://github.com/langchain-ai/deepagents) (`langchain-ai/deepagents`). We use a minimal middleware stack — just automatic context compaction (summarizes older tool calls if the agent is working on a task with many steps) and Anthropic prompt caching (reduces API costs). All other default middleware (filesystem tools, sub-agents, todo lists) is disabled so the agent only sees the text2sql tools it needs.
