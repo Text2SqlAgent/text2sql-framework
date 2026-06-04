@@ -3,7 +3,7 @@
 Plugs text2sql's SQL execution and schema-exploration capabilities into any
 LangChain agent built with `create_agent`, via the middleware interface.
 
-Requires `langchain>=1.0`. Install with: `pip install "text2sql[langchain]"`
+Requires `langchain>=1.0`. Install with: `pip install "text2sql-agent[langchain]"`
 """
 
 from __future__ import annotations

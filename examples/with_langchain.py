@@ -7,7 +7,7 @@ This shows how to plug text2sql into any LangChain agent built with
   - Dialect-aware schema-exploration guidance in the system prompt
 
 Install:
-    pip install "text2sql[langchain,anthropic]"
+    pip install "text2sql-agent[langchain,anthropic]"
 """
 
 from langchain.agents import create_agent

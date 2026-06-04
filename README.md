@@ -69,13 +69,13 @@ Tested on the [Spider benchmark](https://yale-lily.github.io/spider) — the mos
 ## Install
 
 ```bash
-pip install text2sql
+pip install text2sql-agent
 
 # With Anthropic:
-pip install "text2sql[anthropic]"
+pip install "text2sql-agent[anthropic]"
 
 # With OpenAI:
-pip install "text2sql[openai]"
+pip install "text2sql-agent[openai]"
 ```
 
 ## Quick start
@@ -198,7 +198,7 @@ text2sql ask "postgresql://localhost/mydb" --model anthropic:claude-sonnet-4-6
 If you're already building an agent with LangChain's `create_agent`, you can plug text2sql in as middleware instead of using the standalone `TextSQL` class. The middleware adds an `execute_sql` tool, dialect-aware schema-exploration guidance to the system prompt, and (optionally) a `lookup_example` tool wired to your scenarios file.
 
 ```bash
-pip install "text2sql[langchain,anthropic]"
+pip install "text2sql-agent[langchain,anthropic]"
 ```
 
 ```python
