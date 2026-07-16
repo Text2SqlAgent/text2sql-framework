@@ -1,0 +1,27 @@
+name: 💬 Share your use case
+description: Tell me what you're pointing text2sql at — it directly shapes what gets built next
+title: "Use case: "
+labels: ["use-case"]
+body:
+  - type: textarea
+    id: setup
+    attributes:
+      label: What are you pointing it at?
+      description: Database (Postgres/SQLite/Snowflake/...), rough schema size, and what kind of questions you're asking.
+      placeholder: "Postgres, ~60 tables, ERP data. Mostly revenue/AR questions from a chat UI."
+    validations:
+      required: true
+  - type: textarea
+    id: friction
+    attributes:
+      label: What worked, what fought you?
+      description: Anything that surprised you — wrong SQL, slow paths, missing hooks, docs gaps.
+    validations:
+      required: false
+  - type: input
+    id: model
+    attributes:
+      label: Model/provider you're running it with
+      placeholder: "anthropic:claude-sonnet-4-6"
+    validations:
+      required: false
