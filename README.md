@@ -1,5 +1,9 @@
 # text2sql
 
+[![PyPI version](https://img.shields.io/pypi/v/text2sql-framework.svg)](https://pypi.org/project/text2sql-framework/)
+[![Python versions](https://img.shields.io/pypi/pyversions/text2sql-framework.svg)](https://pypi.org/project/text2sql-framework/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 Until recently, LLMs couldn't reliably chain more than a handful of tool calls before losing the thread. Though frontier models now make dozens, hundreds, or even thousands of iterative tool calls from a single prompt, reading each result and deciding what to do next. This unlocks a different shape of text-to-SQL system: instead of pre-computing which schema elements are relevant, you can hand the LLM one tool (`execute_sql`) and let it explore the schema, write queries, test them against real data, and self-correct before returning a final answer. This SDK requires no RAG, semantic layer, schema descriptions, etc. All that is needed is a connection string and a frontier model, as shown in the example below.
 
 As models keep getting better at recursive tool use, the right move is to keep rearchitecting the harness so it constrains the LLM as little as possible (every guardrail you remove is capability you get back).
@@ -18,6 +22,27 @@ result = engine.ask("Which customers have spent more than $10K this year?")
 print(result.sql)   # verified SQL
 print(result.data)  # [{'name': 'Acme Corp', 'total': 14302.50}, ...]
 ```
+
+## Getting started
+
+```bash
+pip install "text2sql-framework[anthropic]"   # or: "text2sql-framework[openai]"
+```
+
+The fastest path from zero to a working query is the bundled demo, which builds
+its own SQLite database (no external database required) and runs a few questions
+against it:
+
+```bash
+git clone https://github.com/Text2SqlAgent/text2sql-framework.git
+export ANTHROPIC_API_KEY=sk-ant-...    # or: export OPENAI_API_KEY=sk-... (uses openai:gpt-4o)
+python text2sql-framework/examples/demo_with_dummy_db.py
+```
+
+Building the dummy database needs no API key; answering the questions calls your
+model, so set `ANTHROPIC_API_KEY` (default `anthropic:claude-sonnet-4-6`) or
+`OPENAI_API_KEY`. See [Install](#install) and [Quick start](#quick-start) below
+for the full package options, supported databases, and the CLI.
 
 ## How it works
 
