@@ -1,8 +1,10 @@
-"""SQL generation using the Deep Agents SDK.
+"""SQL generation using a native tool-calling agent loop.
 
 The LLM gets pre-loaded tools (execute_sql, lookup_example) and a system prompt
-with dialect-specific guidance on where schema metadata lives. Deep Agents handles
-the agentic loop, context compaction, and provider abstraction.
+with dialect-specific guidance on where schema metadata lives. The agent handles
+the agentic loop and provider abstraction. By default this is the dependency-free
+native loop (raw anthropic/openai SDKs); pass ``agent_backend="langchain"`` to use
+the legacy deepagents backend instead (requires the ``langchain`` extra).
 """
 
 from __future__ import annotations
@@ -10,13 +12,26 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from text2sql.agent import create_deep_agent
-
 from text2sql.connection import Database
 from text2sql.dialects import get_dialect_guide
 from text2sql.examples import ExampleStore
 from text2sql.tools import make_tools, _is_read_only
 from text2sql.tracing import Tracer
+
+
+def _get_agent_factory(agent_backend: str):
+    """Return the create_deep_agent factory for the requested backend."""
+    if agent_backend == "native":
+        from text2sql.agent import create_deep_agent
+
+        return create_deep_agent
+    if agent_backend == "langchain":
+        from text2sql.agent_langchain import create_deep_agent
+
+        return create_deep_agent
+    raise ValueError(
+        f"Unknown agent_backend: {agent_backend!r}. Use 'native' (default) or 'langchain'."
+    )
 
 
 @dataclass
@@ -75,7 +90,7 @@ This is a **{dialect}** database.
 
 
 class SQLGenerator:
-    """Creates a Deep Agent pre-loaded with text2sql tools."""
+    """Creates an agent pre-loaded with text2sql tools."""
 
     def __init__(
         self,
@@ -85,6 +100,7 @@ class SQLGenerator:
         custom_metadata: str | None = None,
         example_store: ExampleStore | None = None,
         tracer: Tracer | None = None,
+        agent_backend: str = "native",
     ):
         self.db = db
         self.model = model
@@ -92,10 +108,12 @@ class SQLGenerator:
         self.custom_metadata = custom_metadata
         self.example_store = example_store
         self.tracer = tracer
+        self.agent_backend = agent_backend
 
         self.tools = make_tools(db, example_store)
         self.system_prompt = self._build_system_prompt()
 
+        create_deep_agent = _get_agent_factory(agent_backend)
         self.agent = create_deep_agent(
             model=model,
             tools=self.tools,
