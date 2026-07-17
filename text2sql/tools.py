@@ -1,7 +1,12 @@
 """Tool definitions for text2sql — execute_sql + lookup_example.
 
-These are LangChain @tool functions created via make_tools(), which binds
-them to a specific Database instance (and optional ExampleStore).
+`make_tools()` returns plain Python functions (closures) bound to a specific
+Database instance (and optional ExampleStore). They carry type-hinted
+signatures and docstrings, which the native agent loop turns into JSON tool
+schemas and the LangChain integrations turn into LangChain tools via
+`to_langchain_tools()`. Neither `make_tools` nor this module imports LangChain
+at module load — the LangChain import is lazy and only happens if you call
+`to_langchain_tools()`.
 """
 
 from __future__ import annotations
@@ -49,10 +54,14 @@ def _format_results(rows: list[dict]) -> str:
 
 
 def make_tools(db: Database, example_store: ExampleStore | None = None) -> list:
-    """Create text2sql tools bound to a specific database and optional example store."""
-    from langchain_core.tools import tool
+    """Create text2sql tools bound to a specific database and optional example store.
 
-    @tool
+    Returns plain Python functions (no LangChain dependency). Each function has a
+    type-hinted signature and a docstring; the native agent loop derives a JSON
+    tool schema from these, and `to_langchain_tools()` wraps them for the optional
+    LangChain integrations.
+    """
+
     def execute_sql(sql: str) -> str:
         """Execute a read-only SQL query and return results.
 
@@ -74,7 +83,6 @@ def make_tools(db: Database, example_store: ExampleStore | None = None) -> list:
     tools = [execute_sql]
 
     if example_store:
-        @tool
         def lookup_example(scenario: str) -> str:
             """Look up a curated example scenario by keyword.
 
@@ -88,6 +96,18 @@ def make_tools(db: Database, example_store: ExampleStore | None = None) -> list:
         tools.append(lookup_example)
 
     return tools
+
+
+def to_langchain_tools(tools: list) -> list:
+    """Wrap plain text2sql tool functions as LangChain tools.
+
+    Used by the optional LangChain integrations (`Text2SqlMiddleware` and the
+    deepagents backend in `agent_langchain`). Imports LangChain lazily so the
+    core package never requires it.
+    """
+    from langchain_core.tools import tool as _lc_tool
+
+    return [_lc_tool(fn) for fn in tools]
 
 
 def execute_tool(name: str, arguments: dict, db=None, example_store=None) -> str:

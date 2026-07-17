@@ -20,7 +20,7 @@ from langchain_core.messages import SystemMessage
 from text2sql.connection import Database
 from text2sql.dialects import get_dialect_guide
 from text2sql.examples import ExampleStore
-from text2sql.tools import make_tools
+from text2sql.tools import make_tools, to_langchain_tools
 
 
 class Text2SqlMiddleware(AgentMiddleware):
@@ -61,7 +61,7 @@ class Text2SqlMiddleware(AgentMiddleware):
         self.example_store = ExampleStore(examples) if examples else None
         self.instructions = instructions
 
-        self.tools = make_tools(self.db, self.example_store)
+        self.tools = to_langchain_tools(make_tools(self.db, self.example_store))
         self._prompt_fragment = self._build_prompt_fragment()
 
     def _build_prompt_fragment(self) -> str:

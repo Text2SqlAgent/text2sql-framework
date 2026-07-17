@@ -1,4 +1,4 @@
-"""text2sql - Text-to-SQL with tool-based schema retrieval, powered by Deep Agents."""
+"""text2sql - Text-to-SQL with tool-based schema retrieval and a native agent loop."""
 
 from text2sql.core import TextSQL
 from text2sql.connection import Database

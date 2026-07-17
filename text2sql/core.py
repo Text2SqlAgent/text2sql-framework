@@ -12,9 +12,11 @@ class TextSQL:
     """
     Ask your database questions in plain English.
 
-    Built on LangChain Deep Agents — the LLM gets pre-loaded tools to explore
-    your schema, write SQL, execute it, and self-correct. Context compaction is
-    handled automatically for large schemas.
+    A native tool-calling agent gives the LLM pre-loaded tools to explore your
+    schema, write SQL, execute it, and self-correct. By default it talks directly
+    to the anthropic/openai SDKs (no LangChain required). Pass
+    ``agent_backend="langchain"`` to use the legacy deepagents harness instead
+    (requires the ``langchain`` extra).
 
     Usage:
         engine = TextSQL("sqlite:///mydb.db")
@@ -52,6 +54,7 @@ class TextSQL:
         trace_file: str | None = None,
         api_key: str | None = None,
         api_url: str | None = None,
+        agent_backend: str = "native",
     ):
         self.db = Database(connection_string)
 
@@ -76,6 +79,7 @@ class TextSQL:
             custom_metadata=metadata_hint,
             example_store=self.example_store,
             tracer=self.tracer,
+            agent_backend=agent_backend,
         )
 
 
