@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "text2sql-framework"
-version = "0.3.0"
+version = "0.4.0"
 description = "Framework-agnostic text-to-SQL with tool-based schema retrieval and a native agent loop (raw Anthropic/OpenAI SDKs). LangChain optional."
 readme = "README.md"
 license = "MIT"
