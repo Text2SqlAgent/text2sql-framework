@@ -223,7 +223,7 @@ text2sql ask "postgresql://localhost/mydb" --model anthropic:claude-sonnet-4-6
 If you're already building an agent with LangChain's `create_agent`, you can plug text2sql in as middleware instead of using the standalone `TextSQL` class. The middleware adds an `execute_sql` tool, dialect-aware schema-exploration guidance to the system prompt, and (optionally) a `lookup_example` tool wired to your scenarios file.
 
 ```bash
-pip install "text2sql-framework[langchain,anthropic]"
+pip install "text2sql-framework[langchain]"
 ```
 
 ```python
@@ -248,9 +248,11 @@ print(result["messages"][-1].content)
 
 The middleware requires `langchain>=1.0`. A runnable example lives at [`examples/with_langchain.py`](examples/with_langchain.py).
 
-## Built on Deep Agents
+## Framework-agnostic core
 
-The agent loop is powered by [Deep Agents](https://github.com/langchain-ai/deepagents) (`langchain-ai/deepagents`). We use a minimal middleware stack — just automatic context compaction (summarizes older tool calls if the agent is working on a task with many steps) and Anthropic prompt caching (reduces API costs). All other default middleware (filesystem tools, sub-agents, todo lists) is disabled so the agent only sees the text2sql tools it needs.
+By default, `TextSQL` runs its own agent loop directly against the raw Anthropic or OpenAI SDK (`pip install "text2sql-framework[anthropic]"` or `[openai]`) — no LangChain dependency required. OpenAI-compatible endpoints (OpenRouter, Ollama, vLLM, ...) work via `OPENAI_BASE_URL`.
+
+If you'd rather run on [Deep Agents](https://github.com/langchain-ai/deepagents) (`langchain-ai/deepagents`) — automatic context compaction and Anthropic prompt caching via LangChain middleware — pass `agent_backend="langchain"` and install the `langchain` extra. This is also what [`Text2SqlMiddleware`](#use-with-langchain-agents) uses under the hood.
 
 ## Architecture
 
