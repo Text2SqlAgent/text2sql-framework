@@ -467,3 +467,190 @@ class TestTracePropagation:
         assert trace.sql_attempts == 1
         assert trace.input_tokens == 1060
         assert trace.output_tokens == 65
+
+
+# ---------------------------------------------------------------------------
+# trace_to_db=True — traces persisted into the user's own database
+# ---------------------------------------------------------------------------
+
+
+def _scripted_two_tool_run():
+    """Two execute_sql calls (one schema query, one answer) then a final answer."""
+    return [
+        _FakeAnthropicResponse(
+            content=[
+                _text_block("Let me look at the schema."),
+                _tool_use_block(
+                    "toolu_1",
+                    "execute_sql",
+                    {"sql": "SELECT name FROM sqlite_master WHERE type='table'"},
+                ),
+            ],
+            input_tokens=400,
+            output_tokens=30,
+        ),
+        _FakeAnthropicResponse(
+            content=[
+                _tool_use_block(
+                    "toolu_2",
+                    "execute_sql",
+                    {"sql": "SELECT name FROM customers ORDER BY revenue DESC LIMIT 1"},
+                ),
+            ],
+            input_tokens=450,
+            output_tokens=35,
+        ),
+        _FakeAnthropicResponse(
+            content=[
+                _text_block(
+                    "Bob.\n"
+                    "```sql\nSELECT name FROM customers ORDER BY revenue DESC LIMIT 1\n```"
+                )
+            ],
+            input_tokens=500,
+            output_tokens=20,
+        ),
+    ]
+
+
+class TestDatabaseTracing:
+    def test_traces_and_tool_calls_written_to_db(self, sample_db_path):
+        import json as _json
+
+        from text2sql import TextSQL
+
+        patcher, _ = _patch_anthropic(_scripted_two_tool_run())
+        with patcher:
+            engine = TextSQL(
+                "sqlite:///{}".format(sample_db_path),
+                model="anthropic:claude-sonnet-4-6",
+                trace_to_db=True,
+            )
+            # Opting in must turn tracing on and hand the tracer the same Database.
+            assert engine.tracer is not None
+            assert engine.tracer._db is engine.db
+            result = engine.ask("Top customer by revenue?")
+
+        assert result.success
+
+        # --- query-level summary row ---
+        traces = engine.db.execute("SELECT * FROM text2sql_traces")
+        assert len(traces) == 1
+        row = traces[0]
+        assert row["question"] == "Top customer by revenue?"
+        assert row["final_sql"].startswith("SELECT name FROM customers")
+        assert row["success"] == 1
+        assert row["error"] is None
+        assert row["total_tool_calls"] == 2
+        assert row["sql_attempts"] == 2
+        assert row["sql_errors"] == 0
+        assert row["schema_queries"] == 1
+        assert row["input_tokens"] == 1350
+        assert row["output_tokens"] == 85
+        assert row["duration_seconds"] >= 0
+        assert row["created_at"]
+        trace_id = row["id"]
+        assert trace_id
+
+        # --- one row per individual tool call, in order ---
+        calls = engine.db.execute(
+            "SELECT * FROM text2sql_tool_calls ORDER BY sequence"
+        )
+        assert len(calls) == 2
+        assert [c["trace_id"] for c in calls] == [trace_id, trace_id]
+        assert [c["sequence"] for c in calls] == [0, 1]
+        assert [c["name"] for c in calls] == ["execute_sql", "execute_sql"]
+        assert all(c["id"] for c in calls)
+
+        # arguments are the tool's input, JSON-serialized
+        args = [_json.loads(c["arguments"])["sql"] for c in calls]
+        assert args == [
+            "SELECT name FROM sqlite_master WHERE type='table'",
+            "SELECT name FROM customers ORDER BY revenue DESC LIMIT 1",
+        ]
+
+        # result is the tool's actual output
+        assert "customers" in calls[0]["result"]
+        assert "Bob" in calls[1]["result"]
+
+    def test_tables_created_lazily_and_reused_across_engines(self, sample_db_path):
+        """CREATE TABLE IF NOT EXISTS is idempotent; a second run appends."""
+        from text2sql import TextSQL
+
+        from text2sql.connection import Database
+
+        # No trace tables exist until a query actually completes.
+        probe_db = Database("sqlite:///{}".format(sample_db_path))
+        before = {
+            r["name"]
+            for r in probe_db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        assert not any(n.startswith("text2sql_") for n in before)
+        probe_db.engine.dispose()
+
+        for question in ("Top customer by revenue?", "And again?"):
+            patcher, _ = _patch_anthropic(_scripted_two_tool_run())
+            with patcher:
+                engine = TextSQL(
+                    "sqlite:///{}".format(sample_db_path),
+                    model="anthropic:claude-sonnet-4-6",
+                    trace_to_db=True,
+                )
+                # Lazy: nothing written at construction time.
+                assert not engine.tracer._db_tables_ready
+                engine.ask(question)
+                assert engine.tracer._db_tables_ready
+
+        assert len(engine.db.execute("SELECT * FROM text2sql_traces")) == 2
+        assert len(engine.db.execute("SELECT * FROM text2sql_tool_calls")) == 4
+        # Two distinct parent traces, two tool calls each.
+        rows = engine.db.execute(
+            "SELECT trace_id, COUNT(*) AS n FROM text2sql_tool_calls GROUP BY trace_id"
+        )
+        assert len(rows) == 2
+        assert all(r["n"] == 2 for r in rows)
+
+    def test_disabled_by_default(self, sample_db_path):
+        from text2sql import TextSQL
+
+        patcher, _ = _patch_anthropic([])
+        with patcher:
+            engine = TextSQL("sqlite:///{}".format(sample_db_path))
+        assert engine.tracer is None
+        names = engine.db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        assert not any(n["name"].startswith("text2sql_") for n in names)
+
+    def test_write_failure_disables_db_tracing_without_raising(self, sample_db_path, caplog):
+        """A read-only role (or any DB error) must degrade, never break .ask()."""
+        import logging
+
+        from text2sql.connection import Database
+        from text2sql.tracing import Tracer
+
+        class _BoomEngine:
+            def begin(self):
+                raise RuntimeError("permission denied for table text2sql_traces")
+
+        db = Database("sqlite:///{}".format(sample_db_path))
+        db.engine.dispose()
+        db.engine = _BoomEngine()
+        tracer = Tracer(db=db)
+
+        with caplog.at_level(logging.WARNING, logger="text2sql.tracing"):
+            tracer.start_query("q")
+            tracer.record_tool_call("execute_sql", {"sql": "SELECT 1"}, "1")
+            trace = tracer.end_query("SELECT 1", success=True)  # must not raise
+
+            assert trace.success
+            assert tracer._db_enabled is False
+            assert "Database tracing disabled" in caplog.text
+
+            # Permanently off: no retry, no second warning, no exception.
+            caplog.clear()
+            tracer.start_query("q2")
+            tracer.end_query("SELECT 2", success=True)
+
+        assert tracer._db_enabled is False
+        assert "Database tracing disabled" not in caplog.text
+        # The in-memory sink is unaffected.
+        assert len(tracer.traces) == 2

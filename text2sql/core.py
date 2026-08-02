@@ -38,6 +38,14 @@ class TextSQL:
             api_key="t2s_live_abc123..."
         )
 
+    Store traces in your own database (no separate service or connection string —
+    reuses the connection above and writes to ``text2sql_traces`` and
+    ``text2sql_tool_calls``, created on first write):
+        engine = TextSQL(
+            "postgresql://...",
+            trace_to_db=True,
+        )
+
     Analyze traces for schema and example recommendations:
         report = engine.analyze()
         for rec in report.schema_recommendations:
@@ -55,6 +63,7 @@ class TextSQL:
         api_key: str | None = None,
         api_url: str | None = None,
         agent_backend: str = "native",
+        trace_to_db: bool = False,
     ):
         self.db = Database(connection_string)
 
@@ -62,12 +71,14 @@ class TextSQL:
         if examples:
             self.example_store = ExampleStore(examples)
 
-        # Enable tracing if trace_file or api_key is set
-        if trace_file or api_key:
+        # Enable tracing if trace_file, api_key or trace_to_db is set.
+        # The sinks are independent — any combination is valid.
+        if trace_file or api_key or trace_to_db:
             self.tracer = Tracer(
                 output_path=trace_file,
                 api_key=api_key,
                 api_url=api_url,
+                db=self.db if trace_to_db else None,
             )
         else:
             self.tracer = None

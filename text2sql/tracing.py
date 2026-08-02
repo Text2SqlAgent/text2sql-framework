@@ -18,10 +18,17 @@ from __future__ import annotations
 import json
 import re
 import time
+import uuid
 import logging
 from dataclasses import dataclass, field, asdict
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, TYPE_CHECKING
+
+from sqlalchemy import text as _sql_text
+
+if TYPE_CHECKING:
+    from text2sql.connection import Database
 
 logger = logging.getLogger(__name__)
 
@@ -261,14 +268,105 @@ def _extract_columns_from_result(result_preview):
     return columns
 
 
+# ---------------------------------------------------------------------------
+# Database trace sink
+#
+# Deterministic framework-owned write path. This is NOT reachable from the
+# agent loop: the LLM only ever sees `tools.execute_sql`, which is gated by
+# `_is_read_only`. These statements are fixed strings with bound parameters,
+# executed directly against the SQLAlchemy engine — the model cannot influence
+# the SQL text, the table names, or whether this runs at all.
+#
+# DDL is intentionally lowest-common-denominator so the exact same statement
+# works on SQLite, PostgreSQL and MySQL: no SERIAL/AUTOINCREMENT, no
+# DEFAULT now(), no dialect-specific types. `id`/`created_at` are generated in
+# Python. `success` is stored as 1/0 in an INTEGER for the same reason.
+# ---------------------------------------------------------------------------
+
+_CREATE_TRACES_TABLE = """
+CREATE TABLE IF NOT EXISTS text2sql_traces (
+    id VARCHAR(36) NOT NULL PRIMARY KEY,
+    question TEXT,
+    final_sql TEXT,
+    success INTEGER,
+    error TEXT,
+    duration_seconds REAL,
+    total_tool_calls INTEGER,
+    sql_attempts INTEGER,
+    sql_errors INTEGER,
+    schema_queries INTEGER,
+    schema_backtracking_count INTEGER,
+    llm_iterations INTEGER,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    created_at VARCHAR(32)
+)
+"""
+
+_CREATE_TOOL_CALLS_TABLE = """
+CREATE TABLE IF NOT EXISTS text2sql_tool_calls (
+    id VARCHAR(36) NOT NULL PRIMARY KEY,
+    trace_id VARCHAR(36),
+    sequence INTEGER,
+    name VARCHAR(255),
+    arguments TEXT,
+    result TEXT,
+    execution_ms REAL,
+    llm_think_ms REAL,
+    created_at VARCHAR(32)
+)
+"""
+
+# Best-effort: MySQL has no CREATE INDEX IF NOT EXISTS. Failure here is
+# non-fatal — the index is a lookup optimization, not a correctness need.
+_CREATE_TOOL_CALLS_INDEX = (
+    "CREATE INDEX IF NOT EXISTS idx_text2sql_tool_calls_trace_id "
+    "ON text2sql_tool_calls (trace_id)"
+)
+
+_INSERT_TRACE = """
+INSERT INTO text2sql_traces (
+    id, question, final_sql, success, error, duration_seconds,
+    total_tool_calls, sql_attempts, sql_errors, schema_queries,
+    schema_backtracking_count, llm_iterations, input_tokens, output_tokens,
+    created_at
+) VALUES (
+    :id, :question, :final_sql, :success, :error, :duration_seconds,
+    :total_tool_calls, :sql_attempts, :sql_errors, :schema_queries,
+    :schema_backtracking_count, :llm_iterations, :input_tokens, :output_tokens,
+    :created_at
+)
+"""
+
+_INSERT_TOOL_CALL = """
+INSERT INTO text2sql_tool_calls (
+    id, trace_id, sequence, name, arguments, result,
+    execution_ms, llm_think_ms, created_at
+) VALUES (
+    :id, :trace_id, :sequence, :name, :arguments, :result,
+    :execution_ms, :llm_think_ms, :created_at
+)
+"""
+
+
+def _utc_now_iso():
+    # type: () -> str
+    """Timestamp generated in Python so the DDL needs no DEFAULT clause."""
+    return datetime.now(timezone.utc).isoformat()
+
+
 class Tracer:
     """Collects traces and optionally writes them to a JSONL file.
 
-    Supports auto-sync to a remote dashboard via ``api_key``.
+    Supports auto-sync to a remote dashboard via ``api_key``, and persistence
+    into the user's own database via ``db``.
+
+    The three sinks (file, dashboard, database) are independent and freely
+    combinable — enabling one never disables another.
     """
 
-    def __init__(self, output_path=None, api_key=None, api_url=None, batch_size=5):
-        # type: (Optional[str], Optional[str], Optional[str], int) -> None
+    def __init__(self, output_path=None, api_key=None, api_url=None, batch_size=5, db=None):
+        # type: (Optional[str], Optional[str], Optional[str], int, Optional[Database]) -> None
         self.traces = []  # type: List[QueryTrace]
         self.output_path = Path(output_path) if output_path else None
         self._current = None  # type: Optional[QueryTrace]
@@ -279,6 +377,12 @@ class Tracer:
         self._batch_size = batch_size
         self._sync_buffer = []  # type: List[dict]
         self._http_client = None  # lazy-init
+
+        # Database sink — reuses the caller's existing Database/engine. Tables
+        # are created lazily on the first write, never in __init__.
+        self._db = db
+        self._db_enabled = db is not None
+        self._db_tables_ready = False
 
         # Timing state for per-step latency tracking
         self._last_event_time = 0.0  # when the last tool result came back (or query started)
@@ -443,6 +547,10 @@ class Tracer:
         if self.output_path:
             self._write_trace(trace)
 
+        # Write to the user's own database if configured
+        if self._db_enabled:
+            self._write_trace_to_db(trace)
+
         # Buffer for dashboard sync
         if self._api_key:
             self._sync_buffer.append(trace.to_dict())
@@ -456,6 +564,106 @@ class Tracer:
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.output_path, "a") as f:
             f.write(json.dumps(trace.to_dict(), default=str) + "\n")
+
+    # --- Database sink -----------------------------------------------------
+
+    def _disable_db_tracing(self, what, exc):
+        # type: (str, Exception) -> None
+        """Log once and permanently stop trying to write traces to the DB.
+
+        Tracing is observability, never a hard dependency of the query loop —
+        a read-only role, a missing grant or a dialect quirk must degrade to a
+        single warning, not an exception and not a retry on every query.
+        """
+        if self._db_enabled:
+            logger.warning(
+                "Database tracing disabled — %s: %s. "
+                "Traces will not be written to text2sql_traces / text2sql_tool_calls.",
+                what,
+                exc,
+            )
+        self._db_enabled = False
+
+    def _ensure_db_tables(self):
+        # type: () -> bool
+        """Create the trace tables on first write. Idempotent."""
+        if self._db_tables_ready:
+            return True
+        if not self._db_enabled or self._db is None:
+            return False
+
+        try:
+            # .begin() (not .connect()) — DDL/DML needs a committed transaction.
+            with self._db.engine.begin() as conn:
+                conn.execute(_sql_text(_CREATE_TRACES_TABLE))
+                conn.execute(_sql_text(_CREATE_TOOL_CALLS_TABLE))
+        except Exception as exc:
+            self._disable_db_tracing("could not create trace tables", exc)
+            return False
+
+        try:
+            with self._db.engine.begin() as conn:
+                conn.execute(_sql_text(_CREATE_TOOL_CALLS_INDEX))
+        except Exception as exc:
+            logger.debug("Could not create trace_id index (non-fatal): %s", exc)
+
+        self._db_tables_ready = True
+        return True
+
+    def _write_trace_to_db(self, trace):
+        # type: (QueryTrace) -> None
+        """Insert one summary row plus one row per tool call."""
+        if not self._ensure_db_tables():
+            return
+
+        trace_id = str(uuid.uuid4())
+        created_at = _utc_now_iso()
+
+        try:
+            with self._db.engine.begin() as conn:
+                conn.execute(_sql_text(_INSERT_TRACE), {
+                    "id": trace_id,
+                    "question": trace.question,
+                    "final_sql": trace.final_sql,
+                    "success": 1 if trace.success else 0,
+                    "error": trace.error,
+                    "duration_seconds": trace.duration_seconds,
+                    "total_tool_calls": trace.total_tool_calls,
+                    "sql_attempts": trace.sql_attempts,
+                    "sql_errors": trace.sql_errors,
+                    "schema_queries": trace.schema_queries,
+                    "schema_backtracking_count": trace.schema_backtracking_count,
+                    "llm_iterations": trace.llm_iterations,
+                    "input_tokens": trace.input_tokens,
+                    "output_tokens": trace.output_tokens,
+                    "created_at": created_at,
+                })
+
+                for i, tc in enumerate(trace.tool_calls):
+                    try:
+                        arguments = json.dumps(tc.arguments, default=str)
+                    except (TypeError, ValueError):
+                        arguments = str(tc.arguments)
+                    conn.execute(_sql_text(_INSERT_TOOL_CALL), {
+                        "id": str(uuid.uuid4()),
+                        "trace_id": trace_id,
+                        "sequence": i,
+                        "name": tc.name,
+                        "arguments": arguments,
+                        "result": tc.result_preview,
+                        "execution_ms": tc.execution_ms,
+                        "llm_think_ms": tc.llm_think_ms,
+                        "created_at": created_at,
+                    })
+        except Exception as exc:
+            self._disable_db_tracing("failed to write trace", exc)
+            return
+
+        logger.debug(
+            "Wrote trace %s (%d tool calls) to the database",
+            trace_id,
+            len(trace.tool_calls),
+        )
 
     def _flush_sync(self):
         # type: () -> None
