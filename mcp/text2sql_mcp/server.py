@@ -5,6 +5,9 @@ Configuration is read from environment variables:
   TEXT2SQL_MODEL         (optional)  LangChain model id (default: anthropic:claude-sonnet-4-6)
   TEXT2SQL_INSTRUCTIONS  (optional)  Free-text business rules / hints
   TEXT2SQL_EXAMPLES      (optional)  Path to a scenarios.md file
+  TEXT2SQL_TRACE_TO_DB   (optional)  1/true/yes — write traces back into the
+                                     same database, into the text2sql_traces
+                                     and text2sql_tool_calls tables
 
 Plus the usual provider key — ANTHROPIC_API_KEY or OPENAI_API_KEY —
 which text2sql-framework reads via LangChain.
@@ -19,6 +22,13 @@ from typing import Any
 from mcp.server.mcpserver import MCPServer
 
 _engine = None
+
+_TRUTHY = {"1", "true", "yes"}
+
+
+def _env_flag(name: str) -> bool:
+    """Read a boolean env var. Accepts 1/true/yes, case-insensitively."""
+    return os.environ.get(name, "").strip().lower() in _TRUTHY
 
 
 def _get_engine():
@@ -43,6 +53,8 @@ def _get_engine():
         kwargs["instructions"] = instructions
     if examples := os.environ.get("TEXT2SQL_EXAMPLES"):
         kwargs["examples"] = examples
+    if _env_flag("TEXT2SQL_TRACE_TO_DB"):
+        kwargs["trace_to_db"] = True
 
     _engine = TextSQL(db_url, **kwargs)
     return _engine
