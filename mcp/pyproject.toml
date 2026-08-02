@@ -27,7 +27,7 @@ classifiers = [
 ]
 dependencies = [
     "mcp>=1.0",
-    "text2sql-framework>=0.3",
+    "text2sql-framework>=0.4.0",
     "langchain-anthropic>=0.3",
 ]
 
