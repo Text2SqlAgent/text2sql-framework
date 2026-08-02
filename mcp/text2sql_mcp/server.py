@@ -16,7 +16,7 @@ import os
 import sys
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 _engine = None
 
@@ -48,7 +48,7 @@ def _get_engine():
     return _engine
 
 
-mcp = FastMCP("text2sql")
+mcp = MCPServer("text2sql")
 
 
 @mcp.tool()

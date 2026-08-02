@@ -26,7 +26,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "mcp>=1.0",
+    "mcp>=2.0",
     "text2sql-framework>=0.4.0",
     "langchain-anthropic>=0.3",
 ]
