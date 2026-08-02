@@ -1,0 +1,51 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.cpenniman12/text2sql-mcp",
+  "title": "text2sql",
+  "description": "Ask any SQL database in natural language. Agent explores schema, writes SQL, self-corrects.",
+  "repository": {
+    "url": "https://github.com/cpenniman12/text2sql-mcp",
+    "source": "github"
+  },
+  "version": "0.1.2",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "text2sql-mcp",
+      "version": "0.1.2",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "TEXT2SQL_DATABASE_URL",
+          "description": "SQLAlchemy connection URL, e.g. sqlite:///mydb.db or postgresql://user:pass@host/db",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "ANTHROPIC_API_KEY",
+          "description": "Anthropic API key (required if using the default Anthropic model)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
+        },
+        {
+          "name": "OPENAI_API_KEY",
+          "description": "OpenAI API key (required when TEXT2SQL_MODEL is set to an openai:* model)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
+        },
+        {
+          "name": "TEXT2SQL_MODEL",
+          "description": "Optional LangChain model id (default: anthropic:claude-sonnet-4-6)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}

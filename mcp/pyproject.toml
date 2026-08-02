@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "text2sql-mcp"
+version = "0.1.2"
+description = "MCP server for text2sql-framework. Lets any MCP-compatible assistant (Claude Desktop, Cursor, Goose, etc.) ask a SQL database questions in natural language."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Cooper Penniman" },
+]
+keywords = ["mcp", "sql", "llm", "text-to-sql", "ai", "database", "natural-language", "goose", "claude"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "mcp>=1.0",
+    "text2sql-framework>=0.3",
+    "langchain-anthropic>=0.3",
+]
+
+[project.optional-dependencies]
+openai = ["langchain-openai>=0.3"]
+postgres = ["psycopg2-binary>=2.9"]
+mysql = ["pymysql>=1.1"]
+snowflake = ["snowflake-sqlalchemy>=1.7"]
+bigquery = ["sqlalchemy-bigquery>=1.12"]
+
+[project.scripts]
+text2sql-mcp = "text2sql_mcp.server:main"
+
+[project.urls]
+Homepage = "https://github.com/cpenniman12/text2sql-mcp"
+Repository = "https://github.com/cpenniman12/text2sql-mcp"
+"Bug Tracker" = "https://github.com/cpenniman12/text2sql-mcp/issues"
+"text2sql-framework" = "https://github.com/cpenniman12/text2sql-framework"
+
+[tool.hatch.build.targets.wheel]
+packages = ["text2sql_mcp"]
