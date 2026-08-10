@@ -6,6 +6,7 @@ from text2sql.connection import Database
 from text2sql.examples import ExampleStore
 from text2sql.generate import SQLGenerator, SQLResult
 from text2sql.tracing import Tracer
+from text2sql.state import MemoryStateStore, SQLiteStateStore, SQLAlchemyStateStore, StateStore
 
 
 class TextSQL:
@@ -30,6 +31,20 @@ class TextSQL:
             instructions="Revenue = net revenue after refunds.",
             examples="scenarios.md",
             trace_file="traces/queries.jsonl",
+        )
+
+    Experimental Python-first mode (one persistent Python tool; local state by
+    default; restricted but not a hardened isolation boundary):
+        engine = TextSQL(
+            "sqlite:///analytics.db",
+            agent_mode="python",
+        )
+
+    Put Python-agent state and traces in an explicit separate database:
+        engine = TextSQL(
+            "sqlite:///analytics.db",
+            agent_mode="python",
+            state_store="postgresql://.../agent_state",
         )
 
     Auto-sync traces to the dashboard:
@@ -64,21 +79,52 @@ class TextSQL:
         api_url: str | None = None,
         agent_backend: str = "native",
         trace_to_db: bool = False,
+        enable_python_sandbox: bool = False,
+        agent_mode: str = "tools",
+        state_store: str | bool | StateStore | None = None,
+        workspace_dir: str = ".text2sql",
+        allow_self_modification: bool = False,
     ):
         self.db = Database(connection_string)
+        self.state_db = None
 
         self.example_store = None
         if examples:
             self.example_store = ExampleStore(examples)
 
-        # Enable tracing if trace_file, api_key or trace_to_db is set.
-        # The sinks are independent — any combination is valid.
-        if trace_file or api_key or trace_to_db:
+        # Python-first mode persists locally by default. The source database is
+        # never written unless state_store="database" (or trace_to_db=True) is
+        # explicit. A separate SQLAlchemy URL can be used for state instead.
+        resolved_trace_file = trace_file
+        trace_db = self.db if trace_to_db else None
+        self.state_store = None
+        if agent_mode == "python":
+            resolved_store = "local" if state_store is None else state_store
+            if resolved_store == "local":
+                self.state_store = SQLiteStateStore(f"{workspace_dir}/state.db")
+                resolved_trace_file = resolved_trace_file or f"{workspace_dir}/traces.jsonl"
+            elif resolved_store == "database":
+                self.state_store = SQLAlchemyStateStore(self.db.engine)
+                trace_db = self.db
+            elif isinstance(resolved_store, str) and "://" in resolved_store:
+                self.state_db = Database(resolved_store)
+                self.state_store = SQLAlchemyStateStore(self.state_db.engine)
+                trace_db = self.state_db
+            elif resolved_store in (False, "none"):
+                self.state_store = MemoryStateStore()
+            elif all(hasattr(resolved_store, name) for name in ("get", "put", "delete", "list")):
+                self.state_store = resolved_store
+            else:
+                raise ValueError(
+                    "state_store must be 'local', 'database', a SQLAlchemy URL, False, or a StateStore"
+                )
+
+        if resolved_trace_file or api_key or trace_db:
             self.tracer = Tracer(
-                output_path=trace_file,
+                output_path=resolved_trace_file,
                 api_key=api_key,
                 api_url=api_url,
-                db=self.db if trace_to_db else None,
+                db=trace_db,
             )
         else:
             self.tracer = None
@@ -91,6 +137,10 @@ class TextSQL:
             example_store=self.example_store,
             tracer=self.tracer,
             agent_backend=agent_backend,
+            enable_python_sandbox=enable_python_sandbox,
+            agent_mode=agent_mode,
+            state_store=self.state_store,
+            allow_self_modification=allow_self_modification,
         )
 
 

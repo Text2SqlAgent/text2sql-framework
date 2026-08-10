@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Python-first Text-to-SQL Architecture</title>
+<style>
+:root{--ink:#15231e;--muted:#6a7771;--paper:#f6f2e9;--card:#fffdf8;--line:#d9d4c7;--green:#1f7654;--lime:#b8ef7b;--blue:#6ec9e8;--peach:#ffb58f;--violet:#b8a9ff;--shadow:0 14px 40px rgba(28,39,33,.10)}
+*{box-sizing:border-box} body{margin:0;background:var(--paper);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh}
+body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.42;background-image:radial-gradient(#9fa79d 0.7px,transparent .7px);background-size:18px 18px}
+.shell{position:relative;max-width:1240px;margin:auto;padding:34px 28px 54px}
+header{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:28px}.eyebrow{text-transform:uppercase;letter-spacing:.16em;font-size:11px;font-weight:800;color:var(--green)}
+h1{font-family:Georgia,serif;font-size:clamp(38px,6vw,76px);line-height:.95;letter-spacing:-.045em;margin:8px 0 0;max-width:760px;font-weight:500}h1 em{font-style:normal;color:var(--green)}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--muted);white-space:nowrap}.legend span{display:flex;align-items:center;gap:6px}.dot{width:9px;height:9px;border-radius:50%;background:var(--green)}.dot.optional{background:white;border:2px solid var(--green)}
+.stage{background:rgba(255,253,248,.88);border:1px solid var(--line);border-radius:28px;box-shadow:var(--shadow);padding:22px;backdrop-filter:blur(8px)}
+.topline{display:grid;grid-template-columns:1fr auto 1.15fr auto 2fr;align-items:center;gap:12px}.node{border:1px solid var(--line);background:var(--card);border-radius:18px;padding:17px;min-height:105px;position:relative;transition:.25s ease}.node:hover{transform:translateY(-3px);box-shadow:0 9px 24px rgba(30,43,36,.09)}.node .tag{font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:800}.node strong{display:block;font-family:Georgia,serif;font-size:23px;margin-top:9px;font-weight:500}.node small{display:block;color:var(--muted);margin-top:5px}.parent{border-top:5px solid var(--blue)}.agent{border-top:5px solid var(--lime)}.workspace{border:2px solid var(--green);background:#fafff8}.workspace:after{content:"persistent";position:absolute;right:12px;top:12px;background:var(--lime);padding:4px 8px;border-radius:99px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.08em}
+.arrow{font-size:28px;color:#a5aca6;animation:breathe 1.7s infinite alternate}@keyframes breathe{to{transform:translateX(5px);color:var(--green)}}
+.one-tool{display:inline-flex;align-items:center;gap:8px;border-radius:9px;background:var(--ink);color:white;padding:7px 10px;font:600 12px ui-monospace,SFMono-Regular,Menlo,monospace;margin-top:12px}.pulse{width:6px;height:6px;border-radius:50%;background:var(--lime);box-shadow:0 0 0 0 rgba(184,239,123,.7);animation:pulse 1.7s infinite}@keyframes pulse{70%{box-shadow:0 0 0 8px rgba(184,239,123,0)}}
+.capabilities{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:14px}.cap{border:1px solid var(--line);border-radius:15px;padding:14px 12px;background:white;cursor:pointer;transition:.2s;min-height:96px}.cap:hover,.cap.active{border-color:var(--green);background:#f3ffe9;transform:translateY(-2px)}.icon{font-size:24px}.cap b{display:block;margin:8px 0 3px;font-size:14px}.cap span{font:11px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}
+.detail{margin-top:11px;border-radius:14px;background:var(--ink);color:#e9f2ed;padding:12px 15px;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;min-height:45px}.detail .prompt{color:var(--lime)}
+.bottom{display:grid;grid-template-columns:1.35fr .8fr;gap:14px;margin-top:14px}.panel{border:1px solid var(--line);border-radius:20px;padding:18px;background:rgba(255,255,255,.7)}.panel-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:13px}.panel h2{font-family:Georgia,serif;font-weight:500;margin:0;font-size:21px}.run{border:0;border-radius:99px;background:var(--green);color:white;padding:9px 14px;font-weight:800;cursor:pointer;box-shadow:0 5px 14px rgba(31,118,84,.24)}.run:hover{filter:brightness(1.08)}
+.timeline{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}.step{opacity:.36;border-radius:12px;padding:11px 8px;background:#eeeae0;text-align:center;font-size:11px;font-weight:700;transition:.35s}.step span{display:block;font-size:19px;margin-bottom:5px}.step.on{opacity:1;background:#e7ffd1;box-shadow:inset 0 0 0 1px #b7dd92;transform:translateY(-2px)}
+.storage-map{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:stretch}.store{border:1px solid var(--line);border-radius:15px;padding:13px;text-align:center;background:white;transition:.25s}.store b{display:block;margin:6px 0 3px}.store small{color:var(--muted)}.store.selected{border:2px solid var(--green);background:#f3ffe9}.or{align-self:center;color:var(--muted);font-size:10px;font-weight:800}.storage-note{text-align:center;color:var(--muted);font-size:11px;margin:10px 0 0}.toggle{display:flex;background:#e9e5dc;border-radius:99px;padding:3px}.toggle button{border:0;background:transparent;border-radius:99px;padding:5px 9px;font-size:10px;font-weight:800;color:var(--muted);cursor:pointer}.toggle button.on{background:white;color:var(--ink);box-shadow:0 2px 8px #ccc}
+.safety{display:flex;gap:12px;align-items:center;margin-top:14px;padding:13px 16px;border-radius:16px;border:1px dashed #d39b7d;background:#fff4ed}.safety .shield{font-size:25px}.safety b{font-size:13px}.safety span{color:var(--muted);font-size:12px}.foot{display:flex;justify-content:space-between;margin-top:17px;color:var(--muted);font-size:11px}.badge{color:var(--green);font-weight:800}
+@media(max-width:850px){header{align-items:flex-start;flex-direction:column}.topline{grid-template-columns:1fr}.arrow{transform:rotate(90deg);justify-self:center}.capabilities{grid-template-columns:repeat(2,1fr)}.bottom{grid-template-columns:1fr}.timeline{grid-template-columns:1fr}.legend{white-space:normal}.workspace:after{display:none}}
+</style>
+</head>
+<body>
+<div class="shell">
+<header><div><div class="eyebrow">Text-to-SQL · architecture draft</div><h1>One tool.<br><em>Python runs the investigation.</em></h1></div><div class="legend"><span><i class="dot"></i> default</span><span><i class="dot optional"></i> opt-in</span></div></header>
+<main class="stage">
+  <section class="topline">
+    <div class="node parent"><div class="tag">optional parent</div><strong>Coding agent</strong><small>“Ask the database…”</small></div>
+    <div class="arrow">→</div>
+    <div class="node agent"><div class="tag">specialist</div><strong>Text-to-SQL agent</strong><div class="one-tool"><i class="pulse"></i> run_python(code)</div></div>
+    <div class="arrow">→</div>
+    <div class="node workspace"><div class="tag">restricted runtime</div><strong>Python workspace</strong><small>Variables survive from one call to the next.</small></div>
+  </section>
+
+  <section class="capabilities" aria-label="Python capabilities">
+    <div class="cap active" data-key="db"><div class="icon">◫</div><b>Database</b><span>db.query()</span></div>
+    <div class="cap" data-key="trace"><div class="icon">⌁</div><b>Traces</b><span>traces.search()</span></div>
+    <div class="cap" data-key="skill"><div class="icon">✦</div><b>Skills</b><span>skills.read()</span></div>
+    <div class="cap" data-key="prompt"><div class="icon">¶</div><b>Prompt</b><span>prompt.read()</span></div>
+    <div class="cap" data-key="example"><div class="icon">⌘</div><b>Examples</b><span>examples.lookup()</span></div>
+  </section>
+  <div class="detail" id="detail"><span class="prompt">›</span> tables = db.list_tables() &nbsp;→&nbsp; rows = db.query("SELECT …")</div>
+
+  <section class="bottom">
+    <div class="panel">
+      <div class="panel-head"><h2>A question becomes a tested answer</h2><button class="run" id="run">▶ Run flow</button></div>
+      <div class="timeline">
+        <div class="step"><span>❓</span>Question</div><div class="step"><span>⌕</span>Inspect</div><div class="step"><span>⌨</span>Python + SQL</div><div class="step"><span>✓</span>Verify</div><div class="step"><span>▤</span>Answer + trace</div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Memory goes where you choose</h2><div class="toggle"><button class="on" data-mode="local">LOCAL</button><button data-mode="db">DATABASE</button></div></div>
+      <div class="storage-map"><div class="store selected" id="local"><div class="icon">▣</div><b>.text2sql/</b><small>SQLite + JSONL</small></div><div class="or">OR</div><div class="store" id="db"><div class="icon">▤</div><b>Your database</b><small>explicit opt-in</small></div></div>
+      <p class="storage-note" id="storage-note">Default: nothing is written into your analytics database.</p>
+    </div>
+  </section>
+
+  <aside class="safety"><div class="shield">◇</div><div><b>Wide freedom, narrow boundary.</b><br><span>Read-only DB · capped rows/output · no imports/files/network · self-editing off unless enabled</span></div></aside>
+  <div class="foot"><span>Current draft: synchronous, in-process workspace</span><span class="badge">73 TESTS PASSING</span></div>
+</main>
+</div>
+<script>
+const details={db:'tables = db.list_tables()  →  rows = db.query("SELECT …")',trace:'old = traces.search("failed join")  →  learn from prior runs',skill:'guide = skills.read("net-revenue")  →  reuse business knowledge',prompt:'rules = prompt.read()  →  project-specific behavior',example:'hint = examples.lookup("active customers")  →  known query pattern'};
+document.querySelectorAll('.cap').forEach(c=>c.onclick=()=>{document.querySelectorAll('.cap').forEach(x=>x.classList.remove('active'));c.classList.add('active');document.getElementById('detail').innerHTML='<span class="prompt">›</span> '+details[c.dataset.key]});
+let running=false;document.getElementById('run').onclick=async function(){if(running)return;running=true;const steps=[...document.querySelectorAll('.step')];steps.forEach(s=>s.classList.remove('on'));for(const s of steps){s.classList.add('on');await new Promise(r=>setTimeout(r,430))}await new Promise(r=>setTimeout(r,700));steps.forEach(s=>s.classList.remove('on'));running=false};
+document.querySelectorAll('.toggle button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.toggle button').forEach(x=>x.classList.remove('on'));b.classList.add('on');const mode=b.dataset.mode;document.querySelectorAll('.store').forEach(x=>x.classList.remove('selected'));document.getElementById(mode).classList.add('selected');document.getElementById('storage-note').textContent=mode==='local'?'Default: nothing is written into your analytics database.':'Opt-in: state + traces use framework-owned tables.'});
+</script>
+</body>
+</html>

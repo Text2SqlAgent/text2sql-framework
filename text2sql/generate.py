@@ -10,6 +10,7 @@ the legacy deepagents backend instead (requires the ``langchain`` extra).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import threading
 from typing import Optional
 
 from text2sql.connection import Database
@@ -17,6 +18,7 @@ from text2sql.dialects import get_dialect_guide
 from text2sql.examples import ExampleStore
 from text2sql.tools import make_tools, _is_read_only
 from text2sql.tracing import Tracer
+from text2sql.workspace import PythonWorkspace
 
 
 def _get_agent_factory(agent_backend: str):
@@ -67,6 +69,7 @@ This is a **{dialect}** database.
 ## Tools
 
 - `execute_sql` — run any read-only SQL (SELECT, WITH, SHOW, DESCRIBE, PRAGMA). Use this to explore the schema metadata and test queries. Use LIMIT to keep result sets under 100 rows when possible.
+{python_tool_note}
 {example_tool_note}
 ## Workflow
 
@@ -79,6 +82,10 @@ This is a **{dialect}** database.
 5. WRITE & EXECUTE: Write your SQL and execute it to verify it works
 6. FIX: If it errors, read the error, fix, and re-execute
 
+When available, use `run_python` only when an analysis is materially clearer
+than SQL. It can call `sql("SELECT ...")`, but it does not replace the required
+final SQL query.
+
 ## Rules
 - ALWAYS explore the schema first — never guess table or column names
 - Use exact names from the metadata catalog
@@ -86,6 +93,42 @@ This is a **{dialect}** database.
 - You MUST execute your final SQL via `execute_sql` before responding. Never return SQL you haven't run.
 - If execution fails, read the error, fix the SQL, and execute again. Repeat until it works.
 - Once the query executes successfully, your final response MUST include the SQL inside a ```sql code block. You may include brief commentary outside the code block if helpful. The results are captured automatically and displayed to the user separately.
+{instructions}"""
+
+
+PYTHON_SYSTEM_PROMPT = """You are a Python-first database agent. Translate the user's
+question into a tested, read-only {dialect} SQL query.
+
+You have exactly one tool: `run_python(code)`. Its Python namespace persists
+across calls and contains these capabilities:
+
+- `db.list_tables()`, `db.describe(table)`, `db.schema()`, `db.dialect()`
+- `db.query(sql)` for read-only SQL, returning a list of dictionaries
+- `traces.recent(limit)` and `traces.search(text, limit)`
+- `skills.list()` and `skills.read(name)`
+- `prompt.read()` for the editable prompt addendum
+{modification_note}
+- `examples.list()` and `examples.lookup(name)`
+- basic Python collections, `math`, and `statistics`
+
+This is a **{dialect}** database.
+
+{dialect_guide}
+{custom_metadata}
+## Workflow
+
+1. Use Python to inspect available skills, examples, tables, and schemas.
+2. Use `db.query(...)` inside Python to develop and test the query.
+3. Use Python for calculations or reshaping when useful.
+4. You MUST execute the final SQL through `db.query(...)` before responding.
+5. Return the tested SQL inside a ```sql code block. Brief commentary is allowed.
+
+Do not guess table or column names. Database access must go through the Python
+workspace; there is no standalone SQL tool. When persistent edits are enabled,
+prompt edits take effect on the next `ask()` call.
+
+Available skills: {skill_names}
+{prompt_addendum}
 {instructions}"""
 
 
@@ -101,6 +144,10 @@ class SQLGenerator:
         example_store: ExampleStore | None = None,
         tracer: Tracer | None = None,
         agent_backend: str = "native",
+        enable_python_sandbox: bool = False,
+        agent_mode: str = "tools",
+        state_store=None,
+        allow_self_modification: bool = False,
     ):
         self.db = db
         self.model = model
@@ -109,8 +156,26 @@ class SQLGenerator:
         self.example_store = example_store
         self.tracer = tracer
         self.agent_backend = agent_backend
+        self.enable_python_sandbox = enable_python_sandbox
+        self.agent_mode = agent_mode
+        self.allow_self_modification = allow_self_modification
+        self._ask_lock = threading.RLock()
+        if agent_mode not in {"tools", "python"}:
+            raise ValueError("agent_mode must be 'tools' or 'python'")
+        if agent_mode == "python" and agent_backend != "native":
+            raise ValueError("The initial Python-first agent supports agent_backend='native' only")
 
-        self.tools = make_tools(db, example_store)
+        self.workspace = None
+        if agent_mode == "python":
+            if state_store is None:
+                raise ValueError("Python-first mode requires a state store")
+            self.workspace = PythonWorkspace(
+                db, state_store, tracer=tracer, example_store=example_store,
+                allow_self_modification=allow_self_modification,
+            )
+            self.tools = [self.workspace.make_tool()]
+        else:
+            self.tools = make_tools(db, example_store, enable_python_sandbox)
         self.system_prompt = self._build_system_prompt()
 
         create_deep_agent = _get_agent_factory(agent_backend)
@@ -132,8 +197,31 @@ class SQLGenerator:
         if self.instructions:
             instructions = f"\n## Instructions\n{self.instructions}\n"
 
+        if self.agent_mode == "python":
+            addendum = self.workspace.prompt_addendum() if self.workspace else ""
+            prompt_addendum = (
+                f"\n## Agent-managed prompt addendum\n{addendum}\n" if addendum else ""
+            )
+            names = ", ".join(self.workspace.skill_names()) if self.workspace else ""
+            return PYTHON_SYSTEM_PROMPT.format(
+                dialect=dialect,
+                dialect_guide=dialect_guide,
+                custom_metadata=custom,
+                instructions=instructions,
+                skill_names=names or "none",
+                prompt_addendum=prompt_addendum,
+                modification_note=(
+                    "- `skills.write(name, content)` and `prompt.write(content)` are enabled."
+                    if self.allow_self_modification
+                    else "Persistent skill and prompt writes are disabled for this agent."
+                ),
+            )
+
         example_tool_note = ""
         example_list_note = ""
+        python_tool_note = ""
+        if self.enable_python_sandbox:
+            python_tool_note = "- `run_python` — restricted Python analysis with a read-only `sql(...)` helper.\n"
         if self.example_store:
             example_tool_note = "- `lookup_example` — look up a curated example scenario by keyword (e.g. \"net revenue\", \"customer address\"). Returns guidance on which tables/columns/joins to use.\n"
             scenarios = self.example_store.list_scenarios()
@@ -147,9 +235,21 @@ class SQLGenerator:
             instructions=instructions,
             example_tool_note=example_tool_note,
             example_list_note=example_list_note,
+            python_tool_note=python_tool_note,
         )
 
     def ask(self, question: str, max_rows: int | None = None) -> SQLResult:
+        # The persistent namespace is mutable. Serialize a full ask so concurrent
+        # callers cannot interleave Python cells or poison each other's results.
+        with self._ask_lock:
+            return self._ask_unlocked(question, max_rows=max_rows)
+
+    def _ask_unlocked(self, question: str, max_rows: int | None = None) -> SQLResult:
+        self._query_history_mark = 0
+        if self.agent_mode == "python":
+            self._query_history_mark = len(self.workspace.db.query_history)
+            self.system_prompt = self._build_system_prompt()
+            self.agent.system_prompt = self.system_prompt
         if self.tracer:
             self.tracer.start_query(question)
 
@@ -240,6 +340,15 @@ class SQLGenerator:
                     b.get("text", "") for b in final_text if isinstance(b, dict)
                 )
             final_sql, commentary = _extract_sql_from_response(str(final_text))
+
+        if final_sql and getattr(self, "agent_mode", "tools") == "python":
+            tested = self.workspace.db.query_history[self._query_history_mark:]
+            normalize = lambda value: " ".join(value.strip().rstrip(";").split()).lower()
+            if not tested or normalize(tested[-1]) != normalize(final_sql):
+                error = (
+                    "The final SQL was not the last query tested through "
+                    "db.query(...) in the Python workspace."
+                )
 
         if not final_sql:
             final_text = messages[-1].content if messages else ""

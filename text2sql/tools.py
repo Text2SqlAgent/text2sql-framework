@@ -1,4 +1,4 @@
-"""Tool definitions for text2sql — execute_sql + lookup_example.
+"""Tool definitions for text2sql — SQL, examples, and optional Python analysis.
 
 `make_tools()` returns plain Python functions (closures) bound to a specific
 Database instance (and optional ExampleStore). They carry type-hinted
@@ -53,7 +53,11 @@ def _format_results(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def make_tools(db: Database, example_store: ExampleStore | None = None) -> list:
+def make_tools(
+    db: Database,
+    example_store: ExampleStore | None = None,
+    enable_python_sandbox: bool = False,
+) -> list:
     """Create text2sql tools bound to a specific database and optional example store.
 
     Returns plain Python functions (no LangChain dependency). Each function has a
@@ -81,6 +85,22 @@ def make_tools(db: Database, example_store: ExampleStore | None = None) -> list:
             return f"SQL Error: {e}"
 
     tools = [execute_sql]
+
+    if enable_python_sandbox:
+        def run_python(code: str) -> str:
+            """Run restricted Python for read-only data analysis.
+
+            Call ``sql("SELECT ...")`` to retrieve up to 500 rows per read-only
+            query, then use Python collections, comprehensions, loops, and basic
+            aggregation. Assign a value to ``result`` or call ``print`` to return
+            it. Imports, filesystem/network access, and private attributes are
+            blocked. Use this when SQL alone makes the analysis awkward.
+            """
+            from text2sql.sandbox import run_python as _run_python
+
+            return _run_python(code, db.execute)
+
+        tools.append(run_python)
 
     if example_store:
         def lookup_example(scenario: str) -> str:
@@ -131,6 +151,13 @@ def execute_tool(name: str, arguments: dict, db=None, example_store=None) -> str
             return "No example scenarios configured."
         scenario = arguments.get("scenario", "")
         return example_store.lookup(scenario)
+
+    elif name == "run_python":
+        if not db:
+            return "Python analysis is not available without a database."
+        from text2sql.sandbox import run_python
+
+        return run_python(arguments.get("code", ""), db.execute)
 
     else:
         return f"Unknown tool: {name}"

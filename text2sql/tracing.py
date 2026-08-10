@@ -723,6 +723,29 @@ class Tracer:
                 traces.append(trace)
         return traces
 
+    def stored_traces(self, limit=100):
+        # type: (int) -> List[dict]
+        """Return persisted trace summaries for agent inspection.
+
+        Local JSONL is reloaded so traces survive process restarts. Database
+        mode reads only the framework-owned trace table with fixed SQL.
+        """
+        limit = max(0, min(int(limit), 1000))
+        if self.output_path and self.output_path.exists():
+            return [trace.to_dict() for trace in self.load_traces(str(self.output_path))[-limit:]]
+        if self._db is not None:
+            try:
+                with self._db.engine.connect() as conn:
+                    rows = conn.execute(_sql_text(
+                        "SELECT id, question, final_sql, success, error, duration_seconds, "
+                        "total_tool_calls, llm_iterations, input_tokens, output_tokens, created_at "
+                        "FROM text2sql_traces ORDER BY created_at DESC"
+                    )).mappings().fetchmany(limit)
+                return [dict(row) for row in reversed(rows)]
+            except Exception:
+                pass
+        return [trace.to_dict() for trace in self.traces[-limit:]]
+
     def summary(self):
         # type: () -> dict
         """Aggregate stats across all traced queries."""

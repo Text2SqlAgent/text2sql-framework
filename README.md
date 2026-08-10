@@ -8,6 +8,51 @@ Until recently, LLMs couldn't reliably chain more than a handful of tool calls b
 
 As models keep getting better at recursive tool use, the right move is to keep rearchitecting the harness so it constrains the LLM as little as possible (every guardrail you remove is capability you get back).
 
+### Experimental Python-first agent
+
+Python-first mode gives the model one persistent tool, `run_python(code)`, rather
+than a standalone SQL tool:
+
+```python
+t2s = TextSQL("sqlite:///analytics.db", agent_mode="python")
+result = t2s.ask("Which five customers generated the most revenue?")
+```
+
+Inside Python the agent receives `db` (read-only queries and schema inspection),
+`traces`, `skills`, `prompt`, and `examples`. Variables persist between Python
+calls, so the agent can inspect the database, query it, analyze rows, consult old
+traces, and—when explicitly enabled—save reusable instructions in one workspace. SQL still runs under
+the hood through `db.query(...)`; it is simply no longer a separate model-facing
+tool.
+
+Python-first state is local by default:
+
+```text
+.text2sql/state.db       # skills and editable prompt addendum
+.text2sql/traces.jsonl   # execution traces
+```
+
+Persistence is configurable:
+
+```python
+# Explicitly put state tables and traces in the queried database
+t2s = TextSQL(url, agent_mode="python", state_store="database")
+
+# Allow the model to persist new skills or edit its prompt addendum
+trusted = TextSQL(url, agent_mode="python", allow_self_modification=True)
+
+# Prefer a separate state database
+t2s = TextSQL(url, agent_mode="python", state_store="postgresql://.../agent_state")
+
+# Process-memory state and no default trace file
+t2s = TextSQL(url, agent_mode="python", state_store=False)
+```
+
+The source database is never written by default. The current persistent runtime
+is synchronous and in-process: its AST restrictions are useful agent guardrails,
+not a hardened security boundary. Use read-only database credentials and a
+separate process/container before running code from untrusted users.
+
 **19/20 (95%) on Spider zero-shot across 80 tables and 20 databases. 20/20 after adding one scenario.**
 
 ```python

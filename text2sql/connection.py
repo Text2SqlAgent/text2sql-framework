@@ -13,13 +13,20 @@ class Database:
         self.connection_string = connection_string
         self.engine: Engine = create_engine(connection_string)
 
-    def execute(self, sql: str, params: dict | None = None) -> list[dict]:
-        """Execute SQL and return rows as list of dicts."""
+    def execute(
+        self, sql: str, params: dict | None = None, max_rows: int | None = None
+    ) -> list[dict]:
+        """Execute SQL and return rows as dictionaries.
+
+        ``max_rows`` is applied while fetching, not after materializing the full
+        result set. Model-facing database capabilities always set this limit.
+        """
         with self.engine.connect() as conn:
             result = conn.execute(text(sql), params or {})
             if result.returns_rows:
                 columns = list(result.keys())
-                return [dict(zip(columns, row)) for row in result.fetchall()]
+                rows = result.fetchmany(max_rows) if max_rows is not None else result.fetchall()
+                return [dict(zip(columns, row)) for row in rows]
             return []
 
     def get_inspector(self) -> Inspector:
