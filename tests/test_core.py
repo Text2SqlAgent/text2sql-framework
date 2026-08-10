@@ -69,6 +69,10 @@ class TestDatabase:
         assert len(rows) == 3
         assert rows[0]["first_name"] == "Alice"
 
+    def test_execute_fetches_only_max_rows(self, sample_db):
+        rows = sample_db.execute("SELECT * FROM customers ORDER BY customer_id", max_rows=2)
+        assert len(rows) == 2
+
     def test_dialect(self, sample_db):
         assert sample_db.dialect == "sqlite"
 
@@ -89,6 +93,11 @@ class TestExecuteSql:
             db=sample_db,
         )
         assert "first_name" in result
+
+    def test_blocks_mutating_pragma(self, sample_db):
+        result = execute_tool("execute_sql", {"sql": "PRAGMA user_version=42"}, db=sample_db)
+        assert "Blocked" in result
+        assert sample_db.execute("PRAGMA user_version")[0]["user_version"] == 0
 
     def test_error_returns_message(self, sample_db):
         result = execute_tool(

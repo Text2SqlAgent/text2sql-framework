@@ -34,6 +34,9 @@ def test_workspace_blocks_imports_writes_and_capability_replacement(tmp_path):
     assert "protected workspace capability" in workspace.execute("db = 3")
     assert "cannot be replaced" in workspace.execute("db.query = print")
     assert "writes are disabled" in workspace.execute("skills.write('bad', 'poison')")
+    assert "has no attribute 'append'" in workspace.execute("db.query_history.append('SELECT 99')")
+    assert "limited to 100,000" in workspace.execute("result = sum(range(1000000))")
+    assert "protected workspace capability" in workspace.execute("sum = 7")
 
 
 def test_skills_and_prompt_persist_in_state(tmp_path):
@@ -101,3 +104,7 @@ def test_python_mode_rejects_an_untested_final_query(tmp_path):
     generator.workspace.db.query("SELECT 2")
     result = generator._parse_result("q", [message])
     assert result.success
+
+    generator.workspace.db.query("SELECT 'ABC  X' AS value")
+    changed = MagicMock(content="```sql\nSELECT 'abc x' AS value\n```", tool_calls=[], type="ai")
+    assert "not the last query tested" in generator._parse_result("q", [changed]).error

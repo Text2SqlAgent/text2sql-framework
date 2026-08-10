@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
@@ -117,8 +118,14 @@ class SQLiteStateStore(SQLAlchemyStateStore):
 
     def __init__(self, path: str | Path = ".text2sql/state.db"):
         path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if path.is_symlink():
+            raise ValueError("Refusing to use a symlink as the local agent state database")
         super().__init__(f"sqlite:///{path}")
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
         self.path = path
 
 

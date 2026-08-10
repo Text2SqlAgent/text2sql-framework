@@ -34,7 +34,9 @@ _CAPABILITY_METHODS = {
     "query", "list_tables", "describe", "schema", "dialect",
     "recent", "search", "list", "read", "write", "lookup",
 }
-_RESERVED_NAMES = {"db", "traces", "skills", "prompt", "examples", "math", "statistics"}
+_RESERVED_NAMES = {
+    "db", "traces", "skills", "prompt", "examples", "math", "statistics",
+} | set(_SAFE_BUILTINS)
 MAX_STATE_CHARS = 50_000
 _SAFE_SLUG = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$")
 
@@ -88,7 +90,11 @@ class DatabaseCapability:
         self._database = database
         self._tracer = tracer
         self._calls = 0
-        self.query_history: list[str] = []
+        self._query_history: list[str] = []
+
+    @property
+    def query_history(self) -> tuple[str, ...]:
+        return tuple(self._query_history)
 
     def reset_budget(self) -> None:
         self._calls = 0
@@ -109,7 +115,7 @@ class DatabaseCapability:
             if self._tracer:
                 self._tracer.record_tool_call("execute_sql", {"sql": sql}, f"SQL Error: {exc}")
             raise
-        self.query_history.append(sql)
+        self._query_history.append(sql)
         if self._tracer:
             self._tracer.record_tool_call(
                 "execute_sql", {"sql": sql}, _bounded_json(rows)
@@ -270,19 +276,20 @@ class PythonWorkspace:
         except (SyntaxError, ValueError) as exc:
             return f"Python blocked: {exc}"
 
-        self.db.reset_budget()
-        self._namespace.pop("result", None)
-        output = _BoundedWriter()
-        try:
-            with self._lock, contextlib.redirect_stdout(output):
-                exec(compile(tree, "<text2sql-workspace>", "exec"), self._namespace, self._namespace)
-        except Exception as exc:
-            return f"Python error: {type(exc).__name__}: {exc}"
+        with self._lock:
+            self.db.reset_budget()
+            self._namespace.pop("result", None)
+            output = _BoundedWriter()
+            try:
+                with contextlib.redirect_stdout(output):
+                    exec(compile(tree, "<text2sql-workspace>", "exec"), self._namespace, self._namespace)
+            except Exception as exc:
+                return f"Python error: {type(exc).__name__}: {exc}"
 
-        parts = [output.getvalue().strip()] if output.getvalue().strip() else []
-        if "result" in self._namespace:
-            parts.append(_bounded_json(self._namespace["result"]))
-        return "\n".join(parts)[:MAX_OUTPUT_CHARS] or "Python completed. Assign `result` or call print(...)."
+            parts = [output.getvalue().strip()] if output.getvalue().strip() else []
+            if "result" in self._namespace:
+                parts.append(_bounded_json(self._namespace["result"]))
+            return "\n".join(parts)[:MAX_OUTPUT_CHARS] or "Python completed. Assign `result` or call print(...)."
 
     def make_tool(self):
         workspace = self

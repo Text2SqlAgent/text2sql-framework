@@ -35,6 +35,18 @@ def _is_read_only(sql: str) -> bool:
     first_word = stripped.split()[0].upper()
     if first_word not in ("SELECT", "WITH", "EXPLAIN", "DESCRIBE", "SHOW", "PRAGMA"):
         return False
+    if first_word == "PRAGMA":
+        # SQLite PRAGMA is not inherently read-only (for example,
+        # ``PRAGMA user_version=1`` mutates the database). Only permit the
+        # metadata introspection forms the agent needs.
+        pragma_name = stripped[len("PRAGMA"):].strip().split("(", 1)[0].split("=", 1)[0].strip().lower()
+        safe_pragmas = {
+            "table_info", "table_xinfo", "foreign_key_list", "index_list",
+            "index_info", "index_xinfo", "database_list", "compile_options",
+            "collation_list",
+        }
+        if pragma_name not in safe_pragmas or "=" in stripped:
+            return False
     if _DESTRUCTIVE_PATTERN.search(stripped):
         return False
     return True

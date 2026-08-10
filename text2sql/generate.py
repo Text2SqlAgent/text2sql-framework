@@ -239,8 +239,10 @@ class SQLGenerator:
         )
 
     def ask(self, question: str, max_rows: int | None = None) -> SQLResult:
-        # The persistent namespace is mutable. Serialize a full ask so concurrent
-        # callers cannot interleave Python cells or poison each other's results.
+        # Only Python mode owns a persistent mutable namespace. Preserve parallel
+        # behavior for the original stateless tools mode.
+        if self.agent_mode != "python":
+            return self._ask_unlocked(question, max_rows=max_rows)
         with self._ask_lock:
             return self._ask_unlocked(question, max_rows=max_rows)
 
@@ -343,7 +345,10 @@ class SQLGenerator:
 
         if final_sql and getattr(self, "agent_mode", "tools") == "python":
             tested = self.workspace.db.query_history[self._query_history_mark:]
-            normalize = lambda value: " ".join(value.strip().rstrip(";").split()).lower()
+            # Deliberately preserve case and whitespace inside string literals.
+            # Without a SQL parser, exact text (apart from outer whitespace and a
+            # trailing semicolon) is safer than a lossy normalizer.
+            normalize = lambda value: value.strip().rstrip(";").strip()
             if not tested or normalize(tested[-1]) != normalize(final_sql):
                 error = (
                     "The final SQL was not the last query tested through "
@@ -361,9 +366,7 @@ class SQLGenerator:
                 error = "Blocked: final SQL failed read-only check."
             else:
                 try:
-                    rows = self.db.execute(final_sql)
-                    if max_rows is not None:
-                        rows = rows[:max_rows]
+                    rows = self.db.execute(final_sql, max_rows=max_rows)
                     data = rows
                 except Exception as e:
                     error = f"Final execution failed: {e}"

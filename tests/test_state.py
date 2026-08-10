@@ -32,3 +32,15 @@ def test_state_rejects_non_json(tmp_path):
     store = SQLiteStateStore(tmp_path / "state.db")
     with pytest.raises(TypeError):
         store.put("x", "bad", object())
+
+
+def test_sqlite_state_rejects_symlink(tmp_path):
+    target = tmp_path / "target.db"
+    target.touch()
+    link = tmp_path / "state.db"
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("symlinks unavailable")
+    with pytest.raises(ValueError, match="symlink"):
+        SQLiteStateStore(link)

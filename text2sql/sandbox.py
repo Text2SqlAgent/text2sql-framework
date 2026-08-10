@@ -23,10 +23,18 @@ MAX_SQL_CALLS = 10
 MAX_ROWS_PER_QUERY = 500
 MAX_OUTPUT_CHARS = 12_000
 
+
+
+def _bounded_range(*args):
+    value = range(*args)
+    if len(value) > 100_000:
+        raise ValueError("range() is limited to 100,000 values")
+    return value
+
 _SAFE_BUILTINS = {
     "abs": abs, "all": all, "any": any, "bool": bool, "dict": dict,
     "enumerate": enumerate, "float": float, "int": int, "len": len,
-    "list": list, "max": max, "min": min, "range": range, "reversed": reversed,
+    "list": list, "max": max, "min": min, "range": _bounded_range, "reversed": reversed,
     "print": print, "round": round, "set": set, "sorted": sorted, "str": str, "sum": sum,
     "tuple": tuple, "zip": zip,
 }
