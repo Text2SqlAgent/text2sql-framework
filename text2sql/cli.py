@@ -25,7 +25,7 @@ def main():
 @main.command("init")
 @click.option("--client", type=click.Choice(["claude-code"]), default="claude-code", show_default=True)
 @click.option("--trace-mode", type=click.Choice(["local", "database", "off"]), default="local", show_default=True)
-@click.option("--database-type", type=click.Choice(["sqlite", "postgres", "mysql", "snowflake", "bigquery"]), default="sqlite", show_default=True)
+@click.option("--database-type", type=click.Choice(["sqlite", "postgres", "mysql", "snowflake", "bigquery", "databricks"]), default="sqlite", show_default=True)
 @click.option("--target", type=click.Path(file_okay=False, path_type=str), default=".", show_default=True)
 @click.option("--force", is_flag=True, help="Replace conflicting Text2SQL-owned configuration")
 def init_agent(client, trace_mode, database_type, target, force):

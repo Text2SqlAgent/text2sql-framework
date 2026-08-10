@@ -40,6 +40,27 @@ Manual MCP configuration:
 }
 ```
 
+## Databricks SQL setup
+
+Install/scaffold the Databricks driver extra and keep local tracing enabled:
+
+```bash
+text2sql init --database-type databricks --trace-mode local
+export TEXT2SQL_DATABASE_URL='databricks://token:<PAT>@<workspace-host>?http_path=<warehouse-http-path>&catalog=<catalog>&schema=<schema>'
+claude
+```
+
+Obtain the workspace host and HTTP path from the SQL warehouse connection
+details. Use a dedicated principal/token with only warehouse use, catalog/schema
+use, and `SELECT` privileges. URL-encode connection values when they contain URL
+special characters. Do not commit the URL or token.
+
+Keep state and traces local (the default), or put traces in a separate supported
+transactional database. Databricks source-database tracing creates and writes
+framework tables and is not part of the read-only setup. The dialect cannot
+establish a read-only transaction, so Databricks privileges—not the framework's
+lexical SQL filter—are the authoritative write boundary.
+
 ## Host-agent tools
 
 - `start_query(question)` — starts a traced investigation and returns a `query_id`.

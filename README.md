@@ -146,6 +146,9 @@ pip install "text2sql-framework[anthropic]"
 
 # With OpenAI:
 pip install "text2sql-framework[openai]"
+
+# With the Databricks SQLAlchemy dialect:
+pip install "text2sql-framework[databricks]"
 ```
 
 ## Quick start
@@ -185,7 +188,14 @@ TextSQL("mysql+pymysql://user:pass@localhost/mydb")
 TextSQL("sqlite:///mydb.db")
 TextSQL("mssql+pyodbc://user:pass@server/db?driver=ODBC+Driver+17+for+SQL+Server")
 TextSQL("snowflake://user:pass@account/db/schema")
+TextSQL("databricks://token:<token>@<host>?http_path=<path>&catalog=<catalog>&schema=<schema>")
 ```
+
+For Databricks, use a SQL warehouse (or compatible compute) and a principal with
+only `CAN USE`/`USE CATALOG`/`USE SCHEMA`/`SELECT` privileges. Keep the URL in an
+environment variable rather than source control. The Databricks SQLAlchemy
+dialect does not provide this framework a read-only transaction, so least-privilege
+Databricks grants are the authoritative write boundary.
 
 The agent automatically detects the SQL dialect and adjusts its schema exploration strategy — `information_schema` for PostgreSQL/MySQL/Snowflake, `PRAGMA` for SQLite, `sys.tables` for SQL Server.
 

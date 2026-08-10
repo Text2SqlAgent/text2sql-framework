@@ -281,7 +281,7 @@ class TestReadOnlyBypassPrevention:
 
 class TestDialects:
     def test_known_dialects(self):
-        for d in ["postgresql", "mysql", "sqlite", "mssql", "snowflake", "bigquery"]:
+        for d in ["postgresql", "mysql", "sqlite", "mssql", "snowflake", "bigquery", "databricks"]:
             guide = get_dialect_guide(d)
             assert len(guide) > 50
             assert "table" in guide.lower()

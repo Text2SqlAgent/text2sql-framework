@@ -70,3 +70,14 @@ def test_init_selects_database_driver_extra(tmp_path):
     assert result.exit_code == 0, result.output
     server = json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"]["text2sql"]
     assert server["args"] == ["--from", "text2sql-mcp[postgres]>=0.2.0", "text2sql-mcp"]
+
+
+def test_init_selects_databricks_driver_extra(tmp_path):
+    result = CliRunner().invoke(main, [
+        "init", "--target", str(tmp_path), "--database-type", "databricks"
+    ])
+    assert result.exit_code == 0, result.output
+    server = json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"]["text2sql"]
+    assert server["args"] == [
+        "--from", "text2sql-mcp[databricks]>=0.2.0", "text2sql-mcp"
+    ]

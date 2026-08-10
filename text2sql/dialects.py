@@ -122,6 +122,30 @@ Filter with ILIKE to search by keyword, e.g.:
   WHERE column_name ILIKE '%revenue%'
 """,
 
+    "databricks": """
+## Schema Metadata (Databricks SQL / Unity Catalog)
+
+The connection URL selects an initial catalog and schema. To discover objects:
+  SHOW CATALOGS
+  SHOW SCHEMAS IN catalog_name
+  SHOW TABLES IN catalog_name.schema_name
+
+To search tables and columns visible to the current principal across Unity Catalog:
+  SELECT table_catalog, table_schema, table_name, table_type, comment
+  FROM system.information_schema.tables
+
+  SELECT table_catalog, table_schema, table_name, column_name, data_type, comment
+  FROM system.information_schema.columns
+
+To inspect one object in detail:
+  DESCRIBE TABLE EXTENDED catalog_name.schema_name.table_name
+
+Use backticks around identifiers when needed. Prefer fully-qualified
+`catalog.schema.table` names. `system.information_schema` only returns objects
+that the current principal is allowed to see; it may be unavailable on legacy
+`hive_metastore` workspaces.
+""",
+
     "bigquery": """
 ## Schema Metadata (BigQuery)
 

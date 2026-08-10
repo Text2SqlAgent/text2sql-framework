@@ -26,7 +26,7 @@ _DESTRUCTIVE_PATTERN = re.compile(
 
 
 def _is_read_only(sql: str) -> bool:
-    """Check that SQL is read-only (SELECT/WITH/EXPLAIN/SHOW/PRAGMA only)."""
+    """Check that SQL is read-only (SELECT/WITH/EXPLAIN/DESCRIBE/SHOW/PRAGMA only)."""
     # Strip comments before checking
     stripped = re.sub(r'--[^\n]*', '', sql)  # single-line comments
     stripped = re.sub(r'/\*.*?\*/', '', stripped, flags=re.DOTALL)  # block comments

@@ -36,6 +36,7 @@ dependencies = [
 openai = ["openai>=1.50"]
 anthropic = ["anthropic>=0.40"]
 dashboard = ["httpx>=0.27"]
+databricks = ["databricks-sqlalchemy>=2.0.10"]
 # Legacy deepagents/LangChain backend (agent_backend="langchain") + Text2SqlMiddleware.
 # Includes both provider integrations since agent_langchain.py and create_agent()
 # resolve models via LangChain's own ChatAnthropic/ChatOpenAI, not the raw SDKs above.
@@ -51,6 +52,7 @@ all = [
     "anthropic>=0.40",
     "openai>=1.50",
     "httpx>=0.27",
+    "databricks-sqlalchemy>=2.0.10",
     "deepagents>=0.1",
     "langchain-core>=0.3",
     "langgraph>=0.2",

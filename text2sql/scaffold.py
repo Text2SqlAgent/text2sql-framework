@@ -65,6 +65,7 @@ def scaffold_claude_code(
     database_extras = {
         "sqlite": None, "postgres": "postgres", "mysql": "mysql",
         "snowflake": "snowflake", "bigquery": "bigquery",
+        "databricks": "databricks",
     }
     if database_type not in database_extras:
         raise ValueError(f"Unsupported database type: {database_type}")
