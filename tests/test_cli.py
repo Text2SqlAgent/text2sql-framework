@@ -3,7 +3,7 @@ import json
 from click.testing import CliRunner
 
 from text2sql.cli import main
-from text2sql.scaffold import AGENT_MARKDOWN
+from text2sql.scaffold import AGENT_MARKDOWN, IMPROVE_COMMAND_MARKDOWN, SKILLS_README
 
 
 def test_init_scaffolds_claude_code_without_secret(tmp_path, monkeypatch):
@@ -19,6 +19,9 @@ def test_init_scaffolds_claude_code_without_secret(tmp_path, monkeypatch):
     assert server["env"]["TEXT2SQL_DATABASE_URL"] == "${TEXT2SQL_DATABASE_URL}"
     assert "API_KEY" not in json.dumps(config)
     assert (tmp_path / ".claude/agents/text2sql.md").read_text() == AGENT_MARKDOWN
+    assert (tmp_path / ".claude/commands/improve-text2sql.md").read_text() == IMPROVE_COMMAND_MARKDOWN
+    assert (tmp_path / ".claude/text2sql/skills/README.md").read_text() == SKILLS_README
+    assert server["env"]["TEXT2SQL_SKILLS_DIR"] == ".claude/text2sql/skills"
     assert (tmp_path / ".text2sql/.gitignore").exists()
 
 
@@ -83,13 +86,13 @@ def test_init_selects_databricks_driver_extra(tmp_path):
     ]
 
 
-def test_databricks_database_tracing_requires_separate_postgres(tmp_path):
+def test_databricks_database_tracing_requires_separate_sink(tmp_path):
     result = CliRunner().invoke(main, [
         "init", "--target", str(tmp_path), "--database-type", "databricks",
         "--trace-mode", "database",
     ])
     assert result.exit_code != 0
-    assert "--trace-database-type postgres" in result.output
+    assert "separate --trace-database-type" in result.output
     assert not (tmp_path / ".mcp.json").exists()
 
 
@@ -106,3 +109,32 @@ def test_databricks_with_postgres_trace_database(tmp_path):
     assert server["env"]["TEXT2SQL_TRACE_DATABASE_URL"] == "${TEXT2SQL_TRACE_DATABASE_URL}"
     assert server["env"]["TEXT2SQL_TRACE_DATABASE_SCHEMA"] == "text2sql"
     assert "TEXT2SQL_TRACE_DATABASE_URL" in result.output
+
+
+def test_init_preserves_user_edited_agent_and_improvement_command(tmp_path):
+    runner = CliRunner()
+    first = runner.invoke(main, ["init", "--target", str(tmp_path)])
+    assert first.exit_code == 0, first.output
+    agent = tmp_path / ".claude/agents/text2sql.md"
+    command = tmp_path / ".claude/commands/improve-text2sql.md"
+    agent.write_text("custom agent prompt")
+    command.write_text("custom improvement workflow")
+
+    second = runner.invoke(main, ["init", "--target", str(tmp_path)])
+    assert second.exit_code == 0, second.output
+    assert agent.read_text() == "custom agent prompt"
+    assert command.read_text() == "custom improvement workflow"
+
+
+def test_scaffold_supports_non_postgres_separate_trace_database(tmp_path):
+    result = CliRunner().invoke(main, [
+        "init", "--target", str(tmp_path), "--database-type", "databricks",
+        "--trace-mode", "database", "--trace-database-type", "mysql",
+    ])
+    assert result.exit_code == 0, result.output
+    server = json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"]["text2sql"]
+    assert server["args"] == [
+        "--from", "text2sql-mcp[databricks,mysql]>=0.2.0", "text2sql-mcp"
+    ]
+    assert server["env"]["TEXT2SQL_TRACE_DATABASE_URL"] == "${TEXT2SQL_TRACE_DATABASE_URL}"
+    assert "TEXT2SQL_TRACE_DATABASE_SCHEMA" not in server["env"]

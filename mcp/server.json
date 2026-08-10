@@ -58,6 +58,13 @@
           "isRequired": false,
           "format": "string",
           "isSecret": false
+        },
+        {
+          "name": "TEXT2SQL_SKILLS_DIR",
+          "description": "Directory of Git-tracked Markdown skills",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
         }
       ]
     }

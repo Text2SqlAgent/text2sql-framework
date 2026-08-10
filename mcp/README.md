@@ -18,9 +18,11 @@ export TEXT2SQL_DATABASE_URL='postgresql://readonly@localhost/analytics'
 claude
 ```
 
-`text2sql init` creates `.mcp.json` and
-`.claude/agents/text2sql.md`. It does not store the database URL or any model API
-key. Ask Claude to "use the text2sql subagent" for a database question.
+`text2sql init` creates `.mcp.json`, the editable
+`.claude/agents/text2sql.md` subagent, a `/improve-text2sql` command, and a
+Git-trackable `.claude/text2sql/skills/` directory. It does not store the database
+URL or any model API key. Ask Claude to "use the text2sql subagent" for a database
+question.
 
 Manual MCP configuration:
 
@@ -33,7 +35,8 @@ Manual MCP configuration:
       "env": {
         "TEXT2SQL_DATABASE_URL": "${TEXT2SQL_DATABASE_URL}",
         "TEXT2SQL_TRACE_MODE": "local",
-        "TEXT2SQL_WORKSPACE_DIR": ".text2sql"
+        "TEXT2SQL_WORKSPACE_DIR": ".text2sql",
+        "TEXT2SQL_SKILLS_DIR": ".claude/text2sql/skills"
       }
     }
   }
@@ -69,6 +72,24 @@ coding-assistant runtime. The dialect cannot establish a read-only transaction,
 so dedicated Databricks `SELECT`-only privileges—not the framework's lexical SQL
 filter—are the authoritative write boundary.
 
+## Improve the coding subagent
+
+After traces have accumulated, run this inside Claude Code:
+
+```text
+/improve-text2sql
+```
+
+The editable command template asks the host coding assistant to review up to 100
+recent traces, update `.claude/agents/text2sql.md` and relevant Markdown skills,
+then commit only those changes. It makes no change when the evidence does not
+justify one and never pushes automatically. Both the command template and agent
+prompt are ordinary project files that users can customize.
+
+Skill filenames use letters, numbers, hyphens, or underscores. At the start of a
+new query the MCP runtime lists the current files, and the coding subagent can
+load relevant content through `skills.read(name)`.
+
 ## Host-agent tools
 
 - `start_query(question)` — starts a traced investigation and returns a `query_id`.
@@ -96,7 +117,7 @@ Write traces into framework-owned tables in the queried database:
 "TEXT2SQL_TRACE_MODE": "database"
 ```
 
-Or use a separate trace database:
+Or use a separate trace database supported by SQLAlchemy (Postgres shown):
 
 ```json
 "TEXT2SQL_TRACE_MODE": "database",
@@ -110,6 +131,9 @@ the framework issues `CREATE SCHEMA IF NOT EXISTS "text2sql"`, then creates
 therefore needs database `CREATE` for automatic bootstrap, or a DBA can precreate
 the schema and grant the role `USAGE`, `CREATE`, `SELECT`, and `INSERT` within it.
 Prefer read-only datasource credentials plus local or separate trace storage.
+The setup command can install a separate `sqlite`, `postgres`, `mysql`,
+`snowflake`, or `bigquery` trace driver with `--trace-database-type`; the
+improvement command reads through the same configured trace store.
 
 ## Environment
 
@@ -120,7 +144,8 @@ Prefer read-only datasource credentials plus local or separate trace storage.
 | `TEXT2SQL_TRACE_FILE` | `.text2sql/traces.jsonl` | Local JSONL path |
 | `TEXT2SQL_TRACE_DATABASE_URL` | source DB | Optional separate DB trace sink |
 | `TEXT2SQL_TRACE_DATABASE_SCHEMA` | `text2sql` for separate Postgres | Trace table schema |
-| `TEXT2SQL_WORKSPACE_DIR` | `.text2sql` | Local skills/state directory |
+| `TEXT2SQL_WORKSPACE_DIR` | `.text2sql` | Local runtime state directory |
+| `TEXT2SQL_SKILLS_DIR` | empty | Git-trackable Markdown skill directory |
 | `TEXT2SQL_INSTRUCTIONS` | empty | Optional business guidance returned at query start |
 | `TEXT2SQL_EXAMPLES` | empty | Optional scenarios file |
 

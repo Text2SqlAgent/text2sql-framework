@@ -5,7 +5,7 @@ from text2sql.state import SQLiteStateStore
 from text2sql.workspace import PythonWorkspace
 
 
-def _workspace(tmp_path, tracer=None, allow_self_modification=False):
+def _workspace(tmp_path, tracer=None, allow_self_modification=False, skills_dir=None):
     db_path = tmp_path / "analytics.db"
     engine = create_engine(f"sqlite:///{db_path}")
     with engine.begin() as conn:
@@ -16,6 +16,7 @@ def _workspace(tmp_path, tracer=None, allow_self_modification=False):
         SQLiteStateStore(tmp_path / "state.db"),
         tracer=tracer,
         allow_self_modification=allow_self_modification,
+        skills_dir=skills_dir,
     )
 
 
@@ -108,3 +109,22 @@ def test_python_mode_rejects_an_untested_final_query(tmp_path):
     generator.workspace.db.query("SELECT 'ABC  X' AS value")
     changed = MagicMock(content="```sql\nSELECT 'abc x' AS value\n```", tool_calls=[], type="ai")
     assert "not the last query tested" in generator._parse_result("q", [changed]).error
+
+
+def test_git_tracked_skill_directory_is_authoritative_and_rejects_symlinks(tmp_path):
+    state_workspace = _workspace(tmp_path, allow_self_modification=True)
+    state_workspace.execute("result = skills.write('stale', 'old state skill')")
+    skills_dir = tmp_path / "tracked-skills"
+    skills_dir.mkdir()
+    (skills_dir / "current.md").write_text("current tracked skill")
+
+    workspace = _workspace(tmp_path, skills_dir=skills_dir)
+    assert workspace.skill_names() == ["current"]
+    assert "current tracked skill" in workspace.execute("result = skills.read('current')")
+    assert "Unknown skill" in workspace.execute("result = skills.read('stale')")
+
+    linked = tmp_path / "linked-skills"
+    linked.symlink_to(skills_dir, target_is_directory=True)
+    linked_workspace = _workspace(tmp_path, skills_dir=linked)
+    assert linked_workspace.skill_names() == []
+    assert "Unknown skill" in linked_workspace.execute("result = skills.read('current')")

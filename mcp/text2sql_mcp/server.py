@@ -53,6 +53,7 @@ def _new_session():
         trace_database_schema=os.environ.get("TEXT2SQL_TRACE_DATABASE_SCHEMA") or None,
         examples=os.environ.get("TEXT2SQL_EXAMPLES") or None,
         instructions=os.environ.get("TEXT2SQL_INSTRUCTIONS") or None,
+        skills_dir=os.environ.get("TEXT2SQL_SKILLS_DIR") or None,
     )
 
 

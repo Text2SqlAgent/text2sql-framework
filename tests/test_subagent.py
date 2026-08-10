@@ -136,7 +136,7 @@ def test_local_trace_sink_rejects_symlink_without_breaking_query(tmp_path, caplo
 
 def test_databricks_rejects_source_database_trace_sink(tmp_path):
     import pytest
-    with pytest.raises(ValueError, match="separate Postgres"):
+    with pytest.raises(ValueError, match="separate supported trace database"):
         ExternalAgentSession(
             "databricks://token:test@example.invalid?http_path=/sql/warehouse",
             workspace_dir=tmp_path,
@@ -172,3 +172,22 @@ def test_postgres_trace_sink_creates_and_qualifies_schema():
     assert 'CREATE TABLE IF NOT EXISTS "text2sql"."text2sql_traces"' in sql
     assert 'CREATE TABLE IF NOT EXISTS "text2sql"."text2sql_tool_calls"' in sql
     assert 'INSERT INTO "text2sql"."text2sql_traces"' in sql
+
+
+def test_external_session_loads_git_tracked_markdown_skills(tmp_path):
+    database_url, _ = _database(tmp_path)
+    skills_dir = tmp_path / ".claude/text2sql/skills"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "README.md").write_text("documentation only")
+    (skills_dir / "revenue-definition.md").write_text("Exclude refunded orders.")
+
+    session = ExternalAgentSession(
+        database_url, workspace_dir=tmp_path / ".text2sql",
+        trace_mode="off", skills_dir=skills_dir,
+    )
+    context = session.start_query("revenue")
+    assert context["skills"] == ["revenue-definition"]
+    assert "Exclude refunded orders" in session.run_python(
+        "result = skills.read('revenue-definition')"
+    )
+    session.abort_query()

@@ -162,22 +162,48 @@ class TraceCapability:
 
 
 class SkillCapability:
-    """State-backed reusable instructions exposed as ``skills``."""
+    """Reusable instructions from state and optional Git-trackable Markdown files."""
 
-    def __init__(self, state_store, writable: bool = False):
+    def __init__(self, state_store, writable: bool = False, directory: str | Path | None = None):
         self._state = state_store
         self._writable = writable
+        self._directory = Path(directory) if directory else None
 
     def _name(self, name: str) -> str:
         if not isinstance(name, str) or not _SAFE_SLUG.fullmatch(name):
             raise ValueError("Skill names may contain only letters, numbers, '-' and '_'")
         return name
 
+    def _file(self, name: str) -> Path | None:
+        if self._directory is None:
+            return None
+        return self._directory / f"{name}.md"
+
     def list(self) -> list[str]:
-        return sorted(self._state.list("skills"))
+        if self._directory is None:
+            return sorted(self._state.list("skills"))
+        names = set()
+        if self._directory.is_dir() and not self._directory.is_symlink():
+            for path in self._directory.iterdir():
+                if (
+                    path.is_file() and not path.is_symlink() and path.suffix == ".md"
+                    and path.name != "README.md" and _SAFE_SLUG.fullmatch(path.stem)
+                ):
+                    names.add(path.stem)
+        return sorted(names)
 
     def read(self, name: str) -> str:
         name = self._name(name)
+        if self._directory is not None:
+            path = self._file(name)
+            if self._directory.is_symlink() or not path or not path.is_file() or path.is_symlink():
+                raise ValueError(f"Unknown skill: {name}")
+            if path.stat().st_size > MAX_STATE_CHARS:
+                raise ValueError(f"Skill '{name}' exceeds {MAX_STATE_CHARS:,} characters")
+            try:
+                return path.read_text(encoding="utf-8")[:MAX_OUTPUT_CHARS]
+            except (OSError, UnicodeError) as exc:
+                raise ValueError(f"Could not read skill '{name}'") from exc
         value = self._state.get("skills", name)
         if value is None:
             raise ValueError(f"Unknown skill: {name}")
@@ -244,11 +270,13 @@ class PythonWorkspace:
 
     def __init__(
         self, database, state_store, tracer=None, example_store=None,
-        allow_self_modification: bool = False,
+        allow_self_modification: bool = False, skills_dir: str | Path | None = None,
     ):
         self.db = DatabaseCapability(database, tracer=tracer)
         self.traces = TraceCapability(tracer)
-        self.skills = SkillCapability(state_store, writable=allow_self_modification)
+        self.skills = SkillCapability(
+            state_store, writable=allow_self_modification, directory=skills_dir
+        )
         self.prompt = PromptCapability(state_store, writable=allow_self_modification)
         self.allow_self_modification = allow_self_modification
         self._lock = threading.RLock()

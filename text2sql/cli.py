@@ -26,7 +26,7 @@ def main():
 @click.option("--client", type=click.Choice(["claude-code"]), default="claude-code", show_default=True)
 @click.option("--trace-mode", type=click.Choice(["local", "database", "off"]), default="local", show_default=True)
 @click.option("--database-type", type=click.Choice(["sqlite", "postgres", "mysql", "snowflake", "bigquery", "databricks"]), default="sqlite", show_default=True)
-@click.option("--trace-database-type", type=click.Choice(["source", "postgres"]), default="source", show_default=True, help="Trace sink when --trace-mode=database")
+@click.option("--trace-database-type", type=click.Choice(["source", "sqlite", "postgres", "mysql", "snowflake", "bigquery"]), default="source", show_default=True, help="Trace sink when --trace-mode=database")
 @click.option("--target", type=click.Path(file_okay=False, path_type=str), default=".", show_default=True)
 @click.option("--force", is_flag=True, help="Replace conflicting Text2SQL-owned configuration")
 def init_agent(client, trace_mode, database_type, trace_database_type, target, force):
@@ -44,8 +44,10 @@ def init_agent(client, trace_mode, database_type, trace_database_type, target, f
     for path in paths:
         console.print(f"  {path}")
     console.print("\nSet TEXT2SQL_DATABASE_URL before starting Claude Code.")
-    if trace_mode == "database" and trace_database_type == "postgres":
-        console.print("Set TEXT2SQL_TRACE_DATABASE_URL to the Postgres observability database.")
+    if trace_mode == "database" and trace_database_type != "source":
+        console.print(
+            f"Set TEXT2SQL_TRACE_DATABASE_URL to the separate {trace_database_type} trace database."
+        )
 
 
 @main.command()

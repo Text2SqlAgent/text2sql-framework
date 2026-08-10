@@ -243,12 +243,16 @@ export TEXT2SQL_DATABASE_URL='postgresql://readonly@localhost/analytics'
 claude
 ```
 
-The initializer creates `.mcp.json` and `.claude/agents/text2sql.md`. The
-subagent uses this lifecycle:
+The initializer creates `.mcp.json`, `.claude/agents/text2sql.md`, tracked
+Markdown skills, and an editable `/improve-text2sql` command. The subagent uses
+this lifecycle:
 
 ```text
 start_query → run_python(query_id, ...) → finish_query(query_id, ...)
 ```
+After traces accumulate, run `/improve-text2sql` to commit evidence-based edits
+to the coding-subagent prompt and its tracked skills.
+
 
 Completed and explicitly aborted investigations are traced locally by default:
 

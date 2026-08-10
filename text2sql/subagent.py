@@ -41,6 +41,7 @@ class ExternalAgentSession:
         trace_database_schema: str | None = None,
         examples: str | None = None,
         instructions: str | None = None,
+        skills_dir: str | Path | None = None,
     ):
         if trace_mode not in {"local", "database", "off"}:
             raise ValueError("trace_mode must be 'local', 'database', or 'off'")
@@ -48,7 +49,7 @@ class ExternalAgentSession:
         if trace_mode == "database" and not trace_database_url and source_backend == "databricks":
             raise ValueError(
                 "Databricks tracing requires trace_database_url. Use a separate "
-                "Postgres observability database instead of writing into the source catalog."
+                "supported trace database instead of writing into the source catalog."
             )
 
         self.db = Database(database_url)
@@ -92,6 +93,7 @@ class ExternalAgentSession:
             tracer=self.tracer,
             example_store=example_store,
             allow_self_modification=False,
+            skills_dir=skills_dir,
         )
 
     @property
