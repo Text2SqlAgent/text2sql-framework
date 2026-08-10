@@ -366,7 +366,8 @@ class SQLGenerator:
                 error = "Blocked: final SQL failed read-only check."
             else:
                 try:
-                    rows = self.db.execute(final_sql, max_rows=max_rows)
+                    executor = getattr(self.db, "execute_read_only", self.db.execute)
+                    rows = executor(final_sql, max_rows=max_rows)
                     data = rows
                 except Exception as e:
                     error = f"Final execution failed: {e}"

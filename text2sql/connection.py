@@ -29,6 +29,35 @@ class Database:
                 return [dict(zip(columns, row)) for row in rows]
             return []
 
+    def execute_read_only(
+        self, sql: str, params: dict | None = None, max_rows: int | None = None
+    ) -> list[dict]:
+        """Execute through a database-level read-only transaction when supported.
+
+        This is defense-in-depth around the lexical SQL check. Production users
+        should still supply credentials that have only SELECT/metadata grants.
+        """
+        with self.engine.connect() as conn:
+            dialect = self.dialect
+            sqlite_guard = dialect == "sqlite"
+            if sqlite_guard:
+                conn.exec_driver_sql("PRAGMA query_only=ON")
+            elif dialect in {"postgresql", "mysql", "mariadb"}:
+                conn.exec_driver_sql("SET TRANSACTION READ ONLY")
+            try:
+                result = conn.execute(text(sql), params or {})
+                if not result.returns_rows:
+                    return []
+                columns = list(result.keys())
+                rows = result.fetchmany(max_rows) if max_rows is not None else result.fetchall()
+                return [dict(zip(columns, row)) for row in rows]
+            finally:
+                # SQLite's connection-level flag survives pool checkout unless
+                # explicitly reset; framework-owned trace/state writes use the
+                # unrestricted internal connection afterward.
+                if sqlite_guard:
+                    conn.exec_driver_sql("PRAGMA query_only=OFF")
+
     def get_inspector(self) -> Inspector:
         """Return a SQLAlchemy Inspector for schema introspection."""
         return inspect(self.engine)

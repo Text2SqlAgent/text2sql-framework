@@ -73,6 +73,10 @@ class TestDatabase:
         rows = sample_db.execute("SELECT * FROM customers ORDER BY customer_id", max_rows=2)
         assert len(rows) == 2
 
+    def test_execute_read_only_uses_database_guard(self, sample_db):
+        with pytest.raises(Exception):
+            sample_db.execute_read_only("CREATE TABLE forbidden (id INTEGER)")
+
     def test_dialect(self, sample_db):
         assert sample_db.dialect == "sqlite"
 
@@ -165,6 +169,11 @@ class TestReadOnly:
 
     def test_insert_blocked(self):
         assert not _is_read_only("INSERT INTO foo VALUES (1)")
+
+    def test_select_into_and_side_effect_functions_blocked(self):
+        assert not _is_read_only("SELECT * INTO copied_users FROM users")
+        assert not _is_read_only("SELECT 1 INTO OUTFILE '/tmp/leak'")
+        assert not _is_read_only("SELECT nextval('seq')")
 
     def test_delete_blocked(self):
         assert not _is_read_only("DELETE FROM foo")

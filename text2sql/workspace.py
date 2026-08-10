@@ -110,7 +110,8 @@ class DatabaseCapability:
         if self._tracer:
             self._tracer.record_tool_start()
         try:
-            rows = self._database.execute(sql, max_rows=MAX_ROWS_PER_QUERY)
+            executor = getattr(self._database, "execute_read_only", self._database.execute)
+            rows = executor(sql, max_rows=MAX_ROWS_PER_QUERY)
         except Exception as exc:
             if self._tracer:
                 self._tracer.record_tool_call("execute_sql", {"sql": sql}, f"SQL Error: {exc}")

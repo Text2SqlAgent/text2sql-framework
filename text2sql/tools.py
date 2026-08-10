@@ -19,7 +19,8 @@ if TYPE_CHECKING:
     from text2sql.examples import ExampleStore
 
 _DESTRUCTIVE_PATTERN = re.compile(
-    r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|REPLACE|MERGE|GRANT|REVOKE|EXEC|EXECUTE|CALL)\b",
+    r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|REPLACE|MERGE|GRANT|REVOKE|EXEC|EXECUTE|CALL|INTO)\b"
+    r"|\b(NEXTVAL|SETVAL|PG_ADVISORY_LOCK|GET_LOCK|LOAD_FILE|SLEEP|BENCHMARK)\s*\(",
     re.IGNORECASE,
 )
 
@@ -91,7 +92,8 @@ def make_tools(
         if not _is_read_only(sql):
             return "Blocked: only SELECT/WITH/SHOW/DESCRIBE/PRAGMA queries are allowed."
         try:
-            rows = db.execute(sql)
+            executor = getattr(db, "execute_read_only", db.execute)
+            rows = executor(sql)
             return _format_results(rows)
         except Exception as e:
             return f"SQL Error: {e}"
@@ -153,7 +155,8 @@ def execute_tool(name: str, arguments: dict, db=None, example_store=None) -> str
         if not _is_read_only(sql):
             return "Blocked: only SELECT/WITH/SHOW/DESCRIBE/PRAGMA queries are allowed."
         try:
-            rows = db.execute(sql)
+            executor = getattr(db, "execute_read_only", db.execute)
+            rows = executor(sql)
             return _format_results(rows)
         except Exception as e:
             return f"SQL Error: {e}"
