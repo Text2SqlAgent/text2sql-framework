@@ -22,6 +22,28 @@ def main():
     pass
 
 
+@main.command("init")
+@click.option("--client", type=click.Choice(["claude-code"]), default="claude-code", show_default=True)
+@click.option("--trace-mode", type=click.Choice(["local", "database", "off"]), default="local", show_default=True)
+@click.option("--database-type", type=click.Choice(["sqlite", "postgres", "mysql", "snowflake", "bigquery"]), default="sqlite", show_default=True)
+@click.option("--target", type=click.Path(file_okay=False, path_type=str), default=".", show_default=True)
+@click.option("--force", is_flag=True, help="Replace conflicting Text2SQL-owned configuration")
+def init_agent(client, trace_mode, database_type, target, force):
+    """Create a keyless coding-assistant database subagent in a project."""
+    from text2sql.scaffold import scaffold_claude_code
+
+    try:
+        paths = scaffold_claude_code(
+            target, trace_mode=trace_mode, database_type=database_type, force=force
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    console.print("[green]Text2SQL subagent configured.[/green]")
+    for path in paths:
+        console.print(f"  {path}")
+    console.print("\nSet TEXT2SQL_DATABASE_URL before starting Claude Code.")
+
+
 @main.command()
 @click.argument("connection_string")
 @click.option("--model", default="anthropic:claude-sonnet-4-6", help="Model (e.g. anthropic:claude-sonnet-4-6, openai:gpt-4o, ollama:llama3)")

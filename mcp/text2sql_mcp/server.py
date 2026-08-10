@@ -1,48 +1,73 @@
-"""MCP server exposing text2sql-framework as a single `query` tool.
+"""MCP tools for keyless, coding-assistant-hosted Text2SQL investigation.
 
-Configuration is read from environment variables:
-  TEXT2SQL_DATABASE_URL  (required)  SQLAlchemy URL, e.g. sqlite:///mydb.db
-  TEXT2SQL_MODEL         (optional)  LangChain model id (default: anthropic:claude-sonnet-4-6)
-  TEXT2SQL_INSTRUCTIONS  (optional)  Free-text business rules / hints
-  TEXT2SQL_EXAMPLES      (optional)  Path to a scenarios.md file
-  TEXT2SQL_TRACE_TO_DB   (optional)  1/true/yes — write traces back into the
-                                     same database, into the text2sql_traces
-                                     and text2sql_tool_calls tables
-
-Plus the usual provider key — ANTHROPIC_API_KEY or OPENAI_API_KEY —
-which text2sql-framework reads via LangChain.
+The default lifecycle (`start_query` -> `run_python` -> `finish_query`) uses the
+MCP client's model and needs no provider API key. The legacy autonomous `query`
+tool remains available and only constructs a model client when called.
 """
 
 from __future__ import annotations
 
 import os
 import sys
+import threading
+import uuid
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 
+_sessions = {}
+_trace_reader = None
+_session_lock = threading.RLock()
 _engine = None
-
 _TRUTHY = {"1", "true", "yes"}
+_MAX_ACTIVE_SESSIONS = 32
 
 
 def _env_flag(name: str) -> bool:
-    """Read a boolean env var. Accepts 1/true/yes, case-insensitively."""
     return os.environ.get(name, "").strip().lower() in _TRUTHY
 
 
+def _database_url() -> str:
+    value = os.environ.get("TEXT2SQL_DATABASE_URL")
+    if not value:
+        raise RuntimeError(
+            "TEXT2SQL_DATABASE_URL is not set. Provide a SQLAlchemy URL, "
+            "for example sqlite:///analytics.db"
+        )
+    return value
+
+
+def _new_session():
+    """Construct one isolated host-agent query workspace."""
+    from text2sql import ExternalAgentSession
+
+    trace_mode = os.environ.get("TEXT2SQL_TRACE_MODE", "").strip().lower()
+    if not trace_mode:
+        trace_mode = "database" if _env_flag("TEXT2SQL_TRACE_TO_DB") else "local"
+    return ExternalAgentSession(
+        _database_url(),
+        workspace_dir=os.environ.get("TEXT2SQL_WORKSPACE_DIR", ".text2sql"),
+        trace_mode=trace_mode,
+        trace_file=os.environ.get("TEXT2SQL_TRACE_FILE") or None,
+        trace_database_url=os.environ.get("TEXT2SQL_TRACE_DATABASE_URL") or None,
+        examples=os.environ.get("TEXT2SQL_EXAMPLES") or None,
+        instructions=os.environ.get("TEXT2SQL_INSTRUCTIONS") or None,
+    )
+
+
+def _query_session(query_id: str):
+    with _session_lock:
+        session = _sessions.get(query_id)
+    if session is None:
+        raise ValueError("Unknown or completed query_id; call start_query first")
+    return session
+
+
 def _get_engine():
-    """Lazily build the TextSQL engine on first use."""
+    """Lazily construct the legacy autonomous agent only if `query` is called."""
     global _engine
     if _engine is not None:
         return _engine
-
-    db_url = os.environ.get("TEXT2SQL_DATABASE_URL")
-    if not db_url:
-        raise RuntimeError(
-            "TEXT2SQL_DATABASE_URL is not set. "
-            "Provide a SQLAlchemy connection string, e.g. sqlite:///mydb.db"
-        )
 
     from text2sql import TextSQL
 
@@ -55,8 +80,7 @@ def _get_engine():
         kwargs["examples"] = examples
     if _env_flag("TEXT2SQL_TRACE_TO_DB"):
         kwargs["trace_to_db"] = True
-
-    _engine = TextSQL(db_url, **kwargs)
+    _engine = TextSQL(_database_url(), **kwargs)
     return _engine
 
 
@@ -64,26 +88,65 @@ mcp = MCPServer("text2sql")
 
 
 @mcp.tool()
-def query(question: str, max_rows: int = 100) -> dict:
-    """Ask the database a natural-language question.
+def start_query(question: str) -> dict:
+    """Start an isolated database investigation and return its `query_id`."""
+    with _session_lock:
+        if len(_sessions) >= _MAX_ACTIVE_SESSIONS:
+            raise RuntimeError("Too many unfinished queries; finish or abort an existing query")
+        query_id = str(uuid.uuid4())
+        session = _new_session()
+        context = session.start_query(question)
+        _sessions[query_id] = session
+    return {"query_id": query_id, **context}
 
-    The agent explores the schema, writes SQL, executes it, and self-corrects
-    on errors before returning. Read-only — only SELECT-style statements.
 
-    Args:
-        question: The natural-language question, e.g. "top 5 customers by revenue".
-        max_rows: Cap on rows returned in `data`. Defaults to 100.
+@mcp.tool()
+def run_python(query_id: str, code: str) -> str:
+    """Run restricted persistent Python for one active `query_id`.
 
-    Returns:
-        dict with:
-          sql:    the final verified SQL
-          data:   list of row dicts (capped at max_rows)
-          error:  error message if execution failed, else None
-          row_count:        number of rows in `data`
-          tool_calls_made:  how many SQL calls the agent made while exploring
+    Available capabilities include `db.list_tables()`, `db.describe(table)`,
+    `db.schema()`, read-only `db.query(sql)`, `traces.recent()`, and
+    `skills.list()/read(name)`. Variables persist within the query.
     """
-    engine = _get_engine()
-    result = engine.ask(question, max_rows=max_rows)
+    return _query_session(query_id).run_python(code)
+
+
+@mcp.tool()
+def finish_query(query_id: str, sql: str, max_rows: int = 100) -> dict:
+    """Verify final SQL for `query_id`, return rows, and persist its trace."""
+    session = _query_session(query_id)
+    result = session.finish_query(sql, max_rows=max_rows)
+    if not session.active:
+        with _session_lock:
+            _sessions.pop(query_id, None)
+    return result
+
+
+@mcp.tool()
+def abort_query(query_id: str, error: str = "Host agent aborted the query") -> dict:
+    """Persist an abandoned `query_id` as a failed trace and release it."""
+    session = _query_session(query_id)
+    result = session.abort_query(error)
+    with _session_lock:
+        _sessions.pop(query_id, None)
+    return result
+
+
+@mcp.tool()
+def recent_traces(limit: int = 10) -> list[dict]:
+    """Read recent completed traces for debugging or a future improvement agent."""
+    global _trace_reader
+    with _session_lock:
+        if _trace_reader is None:
+            _trace_reader = _new_session()
+        reader = _trace_reader
+    return reader.recent_traces(limit)
+
+
+@mcp.tool()
+def query(question: str, max_rows: int = 100) -> dict:
+    """Legacy autonomous query requiring a configured model provider API key."""
+    result = _get_engine().ask(question, max_rows=max_rows)
     return {
         "sql": result.sql,
         "data": result.data,
@@ -94,7 +157,6 @@ def query(question: str, max_rows: int = 100) -> dict:
 
 
 def main() -> None:
-    """Entry point for the `text2sql-mcp` console script."""
     try:
         mcp.run()
     except Exception as exc:

@@ -217,38 +217,43 @@ engine = TextSQL(
 )
 ```
 
-### Building scenarios automatically with the MCP
+### Use as a keyless Claude Code subagent
 
-You don't have to write scenarios by hand. The SDK saves full traces of every query — which tables the agent explored, what SQL it tried, what errors it hit, how it self-corrected. The MCP server reads these traces, identifies where the agent struggled, and writes corrective scenarios to `scenarios.md` automatically.
+Claude Code can supply the model reasoning while Text2SQL supplies a persistent,
+read-only Python database workspace. No Anthropic/OpenAI key is needed by the
+Text2SQL process:
 
 ```bash
-pip install text2sql-mcp
+pip install text2sql-framework
+cd your-project
+text2sql init --database-type postgres
+export TEXT2SQL_DATABASE_URL='postgresql://readonly@localhost/analytics'
+claude
 ```
 
-Add to your `.mcp.json`:
+The initializer creates `.mcp.json` and `.claude/agents/text2sql.md`. The
+subagent uses this lifecycle:
 
-```json
-{
-  "mcpServers": {
-    "text2sql": {
-      "command": "text2sql-mcp",
-      "env": {
-        "TEXT2SQL_DB": "sqlite:///mydb.db",
-        "TEXT2SQL_TRACES": "traces.jsonl",
-        "TEXT2SQL_EXAMPLES": "scenarios.md",
-        "ANTHROPIC_API_KEY": "sk-ant-..."
-      }
-    }
-  }
-}
+```text
+start_query → run_python(query_id, ...) → finish_query(query_id, ...)
 ```
 
-The MCP server plugs into Claude Code, Cursor, or any MCP-compatible assistant and exposes two tools:
+Completed and explicitly aborted investigations are traced locally by default:
 
-- **`analyze_traces`** — reads unread traces, sends them to an LLM along with the database schema and current scenarios, and writes improvements to `scenarios.md`
-- **`get_summary`** — quick stats: total traces, success rate, unread count, scenario count
+```text
+.text2sql/traces.jsonl
+```
 
-The loop: run queries → traces accumulate → call `analyze_traces` → scenarios.md gets better → future queries use the improved scenarios via `lookup_example`. This is how we went from 96% to 100% on Spider — the MCP identified a LEFT vs INNER JOIN pattern the agent kept getting wrong and wrote a corrective scenario that fixed it.
+Select database tracing during setup if desired:
+
+```bash
+text2sql init --trace-mode database
+```
+
+That creates and writes the fixed `text2sql_traces` and
+`text2sql_tool_calls` tables. Use local or a separate trace database when the
+analytics connection should remain strictly read-only. See
+[`mcp/README.md`](mcp/README.md) for the tool contract and environment options.
 
 ## CLI
 

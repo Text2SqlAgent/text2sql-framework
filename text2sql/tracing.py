@@ -16,10 +16,12 @@ This data powers the paid analytics layer:
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 import uuid
 import logging
+import threading
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -369,6 +371,8 @@ class Tracer:
         # type: (Optional[str], Optional[str], Optional[str], int, Optional[Database]) -> None
         self.traces = []  # type: List[QueryTrace]
         self.output_path = Path(output_path) if output_path else None
+        self._file_enabled = self.output_path is not None
+        self._file_lock = threading.Lock()
         self._current = None  # type: Optional[QueryTrace]
 
         # Dashboard sync
@@ -386,7 +390,7 @@ class Tracer:
 
         # Timing state for per-step latency tracking
         self._last_event_time = 0.0  # when the last tool result came back (or query started)
-        self._tool_start_time = 0.0  # when the current tool started executing
+        self._tool_start_times = []  # nested (start_time, prior_event_time) pairs
 
     def start_query(self, question):
         # type: (str) -> None
@@ -399,12 +403,12 @@ class Tracer:
             start_time=now,
         )
         self._last_event_time = now
-        self._tool_start_time = 0.0
+        self._tool_start_times = []
 
     def record_tool_start(self):
         # type: () -> None
         """Mark the start of a tool execution. Call before the tool runs."""
-        self._tool_start_time = time.time()
+        self._tool_start_times.append((time.time(), self._last_event_time))
 
     def record_tool_call(self, name, arguments, result):
         # type: (str, dict, str) -> None
@@ -414,16 +418,11 @@ class Tracer:
 
         now = time.time()
 
-        # Compute execution time (tool_start → now)
-        execution_ms = 0.0
-        if self._tool_start_time > 0:
-            execution_ms = round((now - self._tool_start_time) * 1000, 1)
-
-        # Compute LLM think time (last_event → tool_start or now)
-        llm_think_ms = 0.0
-        if self._last_event_time > 0:
-            think_end = self._tool_start_time if self._tool_start_time > 0 else now
-            llm_think_ms = round((think_end - self._last_event_time) * 1000, 1)
+        # A Python tool can contain nested SQL tool calls. Keep a timing stack
+        # so the inner call does not erase the outer call's start time.
+        tool_start, prior_event = self._tool_start_times.pop() if self._tool_start_times else (now, self._last_event_time)
+        execution_ms = round((now - tool_start) * 1000, 1)
+        llm_think_ms = round(max(0.0, tool_start - prior_event) * 1000, 1) if prior_event > 0 else 0.0
 
         self._current.tool_calls.append(ToolCallTrace(
             name=name,
@@ -435,9 +434,7 @@ class Tracer:
         ))
         self._current.total_tool_calls += 1
 
-        # Reset timing state
         self._last_event_time = now
-        self._tool_start_time = 0.0
 
         if name == "execute_sql":
             sql = arguments.get("sql", "")
@@ -561,9 +558,24 @@ class Tracer:
 
     def _write_trace(self, trace):
         # type: (QueryTrace) -> None
-        self.output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.output_path, "a") as f:
-            f.write(json.dumps(trace.to_dict(), default=str) + "\n")
+        if not self._file_enabled or self.output_path is None:
+            return
+        try:
+            with self._file_lock:
+                self.output_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+                if hasattr(os, "O_NOFOLLOW"):
+                    flags |= os.O_NOFOLLOW
+                fd = os.open(self.output_path, flags, 0o600)
+                with os.fdopen(fd, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(trace.to_dict(), default=str, ensure_ascii=False) + "\n")
+                try:
+                    os.chmod(self.output_path, 0o600)
+                except OSError:
+                    pass
+        except Exception as exc:
+            logger.warning("Local trace writing disabled: %s", exc)
+            self._file_enabled = False
 
     # --- Database sink -----------------------------------------------------
 
@@ -713,13 +725,17 @@ class Tracer:
         p = Path(path)
         if not p.exists():
             return traces
-        with open(p) as f:
-            for line in f:
+        with open(p, encoding="utf-8") as f:
+            for line_number, line in enumerate(f, 1):
                 line = line.strip()
                 if not line:
                     continue
-                data = json.loads(line)
-                trace = _dict_to_query_trace(data)
+                try:
+                    data = json.loads(line)
+                    trace = _dict_to_query_trace(data)
+                except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                    logger.warning("Skipping malformed trace line %s in %s: %s", line_number, p, exc)
+                    continue
                 traces.append(trace)
         return traces
 
@@ -731,17 +747,39 @@ class Tracer:
         mode reads only the framework-owned trace table with fixed SQL.
         """
         limit = max(0, min(int(limit), 1000))
-        if self.output_path and self.output_path.exists():
+        if limit == 0:
+            return []
+        if self.output_path and self.output_path.exists() and not self.output_path.is_symlink():
             return [trace.to_dict() for trace in self.load_traces(str(self.output_path))[-limit:]]
         if self._db is not None:
             try:
                 with self._db.engine.connect() as conn:
                     rows = conn.execute(_sql_text(
                         "SELECT id, question, final_sql, success, error, duration_seconds, "
-                        "total_tool_calls, llm_iterations, input_tokens, output_tokens, created_at "
+                        "total_tool_calls, sql_attempts, sql_errors, schema_queries, "
+                        "schema_backtracking_count, llm_iterations, input_tokens, output_tokens, created_at "
                         "FROM text2sql_traces ORDER BY created_at DESC"
                     )).mappings().fetchmany(limit)
-                return [dict(row) for row in reversed(rows)]
+                    records = []
+                    for row in reversed(rows):
+                        record = dict(row)
+                        calls = conn.execute(_sql_text(
+                            "SELECT sequence, name, arguments, result, execution_ms, llm_think_ms, created_at "
+                            "FROM text2sql_tool_calls WHERE trace_id = :trace_id ORDER BY sequence"
+                        ), {"trace_id": record["id"]}).mappings().all()
+                        tool_calls = []
+                        for call in calls:
+                            item = dict(call)
+                            raw_arguments = item.pop("arguments", "{}")
+                            try:
+                                item["arguments"] = json.loads(raw_arguments)
+                            except (json.JSONDecodeError, TypeError):
+                                item["arguments"] = {"raw": str(raw_arguments)}
+                            item["result_preview"] = item.pop("result", "")
+                            tool_calls.append(item)
+                        record["tool_calls"] = tool_calls
+                        records.append(record)
+                return records
             except Exception:
                 pass
         return [trace.to_dict() for trace in self.traces[-limit:]]

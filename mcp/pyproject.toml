@@ -4,11 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "text2sql-mcp"
-version = "0.1.3"
-description = "MCP server for text2sql-framework. Lets any MCP-compatible assistant (Claude Desktop, Cursor, Goose, etc.) ask a SQL database questions in natural language."
+version = "0.2.0"
+description = "Keyless Text2SQL workspace for coding assistants and MCP clients."
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.14"
 authors = [
     { name = "Cooper Penniman" },
 ]
@@ -27,12 +27,12 @@ classifiers = [
 ]
 dependencies = [
     "mcp>=2.0",
-    "text2sql-framework>=0.5.0",
-    "langchain-anthropic>=0.3",
+    "text2sql-framework>=0.6.0",
 ]
 
 [project.optional-dependencies]
-openai = ["langchain-openai>=0.3"]
+anthropic = ["text2sql-framework[anthropic]>=0.6.0"]
+openai = ["text2sql-framework[openai]>=0.6.0"]
 postgres = ["psycopg2-binary>=2.9"]
 mysql = ["pymysql>=1.1"]
 snowflake = ["snowflake-sqlalchemy>=1.7"]

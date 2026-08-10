@@ -2,77 +2,100 @@
 
 <!-- mcp-name: io.github.cpenniman12/text2sql-mcp -->
 
-MCP server for [text2sql-framework](https://github.com/cpenniman12/text2sql-framework). Plugs into Claude Desktop, Cursor, Goose, or any other MCP-compatible assistant and lets it ask a SQL database questions in natural language.
+A keyless, persistent Text2SQL workspace for Claude Code and other MCP coding
+assistants. The coding assistant supplies the model reasoning; this server
+supplies restricted Python, read-only database access, verification, and traces.
 
-The agent explores the schema, writes SQL, executes it against the real DB, and self-corrects on errors — no RAG layer, no schema descriptions, no pre-computed embeddings.
+## Claude Code setup
 
-## Install
-
-Out of the box, `text2sql-mcp` supports **SQLite + Anthropic**:
+Install the framework, then scaffold the project:
 
 ```bash
-pip install text2sql-mcp
-# or
-uvx text2sql-mcp
+pip install text2sql-framework
+cd your-project
+text2sql init --database-type postgres
+export TEXT2SQL_DATABASE_URL='postgresql://readonly@localhost/analytics'
+claude
 ```
 
-For other databases or LLM providers, install with the matching extra so the right driver gets installed:
+`text2sql init` creates `.mcp.json` and
+`.claude/agents/text2sql.md`. It does not store the database URL or any model API
+key. Ask Claude to "use the text2sql subagent" for a database question.
 
-| You want… | Install command |
-| --- | --- |
-| SQLite (default) | `uvx text2sql-mcp` |
-| Postgres | `uvx 'text2sql-mcp[postgres]'` |
-| MySQL | `uvx 'text2sql-mcp[mysql]'` |
-| Snowflake | `uvx 'text2sql-mcp[snowflake]'` |
-| BigQuery | `uvx 'text2sql-mcp[bigquery]'` |
-| OpenAI models | add `openai`, e.g. `uvx 'text2sql-mcp[postgres,openai]'` |
-
-## Configure
-
-Set environment variables in your MCP client config:
-
-| Variable | Required | Description |
-| --- | --- | --- |
-| `TEXT2SQL_DATABASE_URL` | yes | SQLAlchemy URL, e.g. `sqlite:///mydb.db`, `postgresql://user:pass@host/db` |
-| `ANTHROPIC_API_KEY` *or* `OPENAI_API_KEY` | yes | LLM provider key |
-| `TEXT2SQL_MODEL` | no | LangChain model id (default: `anthropic:claude-sonnet-4-6`) |
-| `TEXT2SQL_INSTRUCTIONS` | no | Business rules / hints, e.g. "Revenue = net of refunds." |
-| `TEXT2SQL_EXAMPLES` | no | Path to a scenarios.md file for the agent's `lookup_example` tool |
-
-### Claude Desktop / Cursor / generic MCP
+Manual MCP configuration:
 
 ```json
 {
   "mcpServers": {
     "text2sql": {
       "command": "uvx",
-      "args": ["text2sql-mcp"],
+      "args": ["--from", "text2sql-mcp>=0.2.0", "text2sql-mcp"],
       "env": {
-        "TEXT2SQL_DATABASE_URL": "sqlite:///mydb.db",
-        "ANTHROPIC_API_KEY": "sk-ant-..."
+        "TEXT2SQL_DATABASE_URL": "${TEXT2SQL_DATABASE_URL}",
+        "TEXT2SQL_TRACE_MODE": "local",
+        "TEXT2SQL_WORKSPACE_DIR": ".text2sql"
       }
     }
   }
 }
 ```
 
-### Goose CLI
+## Host-agent tools
 
-```bash
-goose configure
-# Add Extension → Command-line Extension
-# Name: text2sql
-# Command: uvx text2sql-mcp
-# Env: TEXT2SQL_DATABASE_URL, ANTHROPIC_API_KEY
+- `start_query(question)` — starts a traced investigation and returns a `query_id`.
+- `run_python(query_id, code)` — persistent restricted Python with `db`, `traces`,
+  `skills`, and schema capabilities.
+- `finish_query(query_id, sql, max_rows=100)` — requires the exact final SQL to have been
+  successfully tested with `db.query()` and persists the completed trace.
+- `abort_query(query_id, error)` — persists an abandoned investigation as a failed trace.
+- `recent_traces(limit=10)` — reads completed traces.
+
+The legacy `query(question)` tool is retained for autonomous model-backed use,
+but unlike the host-agent tools it requires a provider extra and API key.
+
+## Trace storage
+
+Local JSONL is the default:
+
+```text
+.text2sql/traces.jsonl
 ```
 
-## Tools
+Write traces into framework-owned tables in the queried database:
 
-- **`query(question, max_rows=100)`** — ask the database a natural-language question. Returns `{sql, data, error, row_count, tool_calls_made}`.
+```json
+"TEXT2SQL_TRACE_MODE": "database"
+```
 
-## How it works
+Or use a separate trace database:
 
-Under the hood this is a thin wrapper around [text2sql-framework](https://github.com/cpenniman12/text2sql-framework), which uses LangChain Deep Agents to do iterative tool-calling against a single `execute_sql` tool. See the framework README for benchmarks (19/20 on Spider zero-shot across 80 tables) and architecture details.
+```json
+"TEXT2SQL_TRACE_MODE": "database",
+"TEXT2SQL_TRACE_DATABASE_URL": "postgresql://.../agent_observability"
+```
+
+Database tracing requires permission to create and insert into
+`text2sql_traces` and `text2sql_tool_calls`. Prefer read-only database credentials
+plus local or separate trace storage in production.
+
+## Environment
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `TEXT2SQL_DATABASE_URL` | required | SQLAlchemy datasource URL |
+| `TEXT2SQL_TRACE_MODE` | `local` | `local`, `database`, or `off` |
+| `TEXT2SQL_TRACE_FILE` | `.text2sql/traces.jsonl` | Local JSONL path |
+| `TEXT2SQL_TRACE_DATABASE_URL` | source DB | Optional separate DB trace sink |
+| `TEXT2SQL_WORKSPACE_DIR` | `.text2sql` | Local skills/state directory |
+| `TEXT2SQL_INSTRUCTIONS` | empty | Optional business guidance returned at query start |
+| `TEXT2SQL_EXAMPLES` | empty | Optional scenarios file |
+
+## Security
+
+SQL is lexically checked and executed using database-level read-only guards where
+supported, but production deployments should still use credentials with only the
+minimum read grants. Restricted Python is currently in-process and is not a
+hardened sandbox for untrusted users.
 
 ## License
 
