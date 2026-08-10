@@ -58,6 +58,7 @@ def scaffold_claude_code(
     force: bool = False,
     mcp_command: str = "uvx",
     database_type: str = "sqlite",
+    trace_database_type: str = "source",
 ) -> list[Path]:
     """Create `.mcp.json` and a Claude Code subagent without storing DB secrets."""
     if trace_mode not in {"local", "database", "off"}:
@@ -69,6 +70,13 @@ def scaffold_claude_code(
     }
     if database_type not in database_extras:
         raise ValueError(f"Unsupported database type: {database_type}")
+    if trace_database_type not in {"source", "postgres"}:
+        raise ValueError("trace_database_type must be source or postgres")
+    if database_type == "databricks" and trace_mode == "database" and trace_database_type == "source":
+        raise ValueError(
+            "Databricks database tracing requires --trace-database-type postgres; "
+            "writing trace tables into the queried Databricks catalog is unsupported"
+        )
     root = Path(target).resolve()
     mcp_path = root / ".mcp.json"
     agent_path = root / ".claude" / "agents" / "text2sql.md"
@@ -90,21 +98,27 @@ def scaffold_claude_code(
     servers = config.get("mcpServers", {})
     if not isinstance(servers, dict):
         raise ValueError("Existing .mcp.json 'mcpServers' must be an object")
-    extra = database_extras[database_type]
+    extras = []
+    source_extra = database_extras[database_type]
+    if source_extra:
+        extras.append(source_extra)
+    if trace_mode == "database" and trace_database_type == "postgres":
+        extras.append("postgres")
+    extras = sorted(set(extras))
     if mcp_command == "uvx":
-        package = f"text2sql-mcp[{extra}]>=0.2.0" if extra else "text2sql-mcp>=0.2.0"
+        suffix = f"[{','.join(extras)}]" if extras else ""
+        package = f"text2sql-mcp{suffix}>=0.2.0"
         args = ["--from", package, "text2sql-mcp"]
     else:
         args = []
-    server = {
-        "command": mcp_command,
-        "args": args,
-        "env": {
-            "TEXT2SQL_DATABASE_URL": "${TEXT2SQL_DATABASE_URL}",
-            "TEXT2SQL_TRACE_MODE": trace_mode,
-            "TEXT2SQL_WORKSPACE_DIR": ".text2sql",
-        },
+    env = {
+        "TEXT2SQL_DATABASE_URL": "${TEXT2SQL_DATABASE_URL}",
+        "TEXT2SQL_TRACE_MODE": trace_mode,
+        "TEXT2SQL_WORKSPACE_DIR": ".text2sql",
     }
+    if trace_mode == "database" and trace_database_type == "postgres":
+        env["TEXT2SQL_TRACE_DATABASE_URL"] = "${TEXT2SQL_TRACE_DATABASE_URL}"
+    server = {"command": mcp_command, "args": args, "env": env}
     existing = servers.get("text2sql")
     if existing is not None and existing != server and not force:
         raise ValueError("A different 'text2sql' MCP server already exists; use --force to replace it")

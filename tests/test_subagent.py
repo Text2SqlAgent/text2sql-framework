@@ -131,3 +131,13 @@ def test_local_trace_sink_rejects_symlink_without_breaking_query(tmp_path, caplo
     assert result["aborted"] is True
     assert target.read_text() == ""
     assert "Local trace writing disabled" in caplog.text
+
+
+def test_databricks_rejects_source_database_trace_sink(tmp_path):
+    import pytest
+    with pytest.raises(ValueError, match="separate Postgres"):
+        ExternalAgentSession(
+            "databricks://token:test@example.invalid?http_path=/sql/warehouse",
+            workspace_dir=tmp_path,
+            trace_mode="database",
+        )

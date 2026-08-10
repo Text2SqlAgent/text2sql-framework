@@ -55,11 +55,19 @@ details. Use a dedicated principal/token with only warehouse use, catalog/schema
 use, and `SELECT` privileges. URL-encode connection values when they contain URL
 special characters. Do not commit the URL or token.
 
-Keep state and traces local (the default), or put traces in a separate supported
-transactional database. Databricks source-database tracing creates and writes
-framework tables and is not part of the read-only setup. The dialect cannot
-establish a read-only transaction, so Databricks privileges—not the framework's
-lexical SQL filter—are the authoritative write boundary.
+Keep state and traces local (the default), or send traces to a separate Postgres
+control plane:
+
+```bash
+text2sql init --database-type databricks --trace-mode database --trace-database-type postgres
+export TEXT2SQL_TRACE_DATABASE_URL='postgresql://text2sql_writer:<password>@<host>/agent_observability'
+```
+
+This installs both drivers and adds the trace URL environment reference without
+storing either credential. Databricks source-database tracing is rejected by the
+coding-assistant runtime. The dialect cannot establish a read-only transaction,
+so dedicated Databricks `SELECT`-only privileges—not the framework's lexical SQL
+filter—are the authoritative write boundary.
 
 ## Host-agent tools
 

@@ -81,3 +81,27 @@ def test_init_selects_databricks_driver_extra(tmp_path):
     assert server["args"] == [
         "--from", "text2sql-mcp[databricks]>=0.2.0", "text2sql-mcp"
     ]
+
+
+def test_databricks_database_tracing_requires_separate_postgres(tmp_path):
+    result = CliRunner().invoke(main, [
+        "init", "--target", str(tmp_path), "--database-type", "databricks",
+        "--trace-mode", "database",
+    ])
+    assert result.exit_code != 0
+    assert "--trace-database-type postgres" in result.output
+    assert not (tmp_path / ".mcp.json").exists()
+
+
+def test_databricks_with_postgres_trace_database(tmp_path):
+    result = CliRunner().invoke(main, [
+        "init", "--target", str(tmp_path), "--database-type", "databricks",
+        "--trace-mode", "database", "--trace-database-type", "postgres",
+    ])
+    assert result.exit_code == 0, result.output
+    server = json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"]["text2sql"]
+    assert server["args"] == [
+        "--from", "text2sql-mcp[databricks,postgres]>=0.2.0", "text2sql-mcp"
+    ]
+    assert server["env"]["TEXT2SQL_TRACE_DATABASE_URL"] == "${TEXT2SQL_TRACE_DATABASE_URL}"
+    assert "TEXT2SQL_TRACE_DATABASE_URL" in result.output

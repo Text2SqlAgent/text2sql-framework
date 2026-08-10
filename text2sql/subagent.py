@@ -6,6 +6,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy.engine import make_url
+
 from text2sql.connection import Database
 from text2sql.examples import ExampleStore
 from text2sql.sandbox import MAX_ROWS_PER_QUERY
@@ -41,6 +43,12 @@ class ExternalAgentSession:
     ):
         if trace_mode not in {"local", "database", "off"}:
             raise ValueError("trace_mode must be 'local', 'database', or 'off'")
+        source_backend = make_url(database_url).get_backend_name()
+        if trace_mode == "database" and not trace_database_url and source_backend == "databricks":
+            raise ValueError(
+                "Databricks tracing requires trace_database_url. Use a separate "
+                "Postgres observability database instead of writing into the source catalog."
+            )
 
         self.db = Database(database_url)
         self.trace_db = None

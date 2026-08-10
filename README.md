@@ -196,6 +196,8 @@ only `CAN USE`/`USE CATALOG`/`USE SCHEMA`/`SELECT` privileges. Keep the URL in a
 environment variable rather than source control. The Databricks SQLAlchemy
 dialect does not provide this framework a read-only transaction, so least-privilege
 Databricks grants are the authoritative write boundary.
+For database-backed traces, use a separate Postgres sink rather than the queried
+Databricks catalog; see [`mcp/README.md`](mcp/README.md#databricks-sql-setup).
 
 The agent automatically detects the SQL dialect and adjusts its schema exploration strategy — `information_schema` for PostgreSQL/MySQL/Snowflake, `PRAGMA` for SQLite, `sys.tables` for SQL Server.
 

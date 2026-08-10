@@ -32,11 +32,18 @@ class Database:
     def execute_read_only(
         self, sql: str, params: dict | None = None, max_rows: int | None = None
     ) -> list[dict]:
-        """Execute through a database-level read-only transaction when supported.
+        """Execute read-only SQL with lexical and database-level guards where supported.
 
-        This is defense-in-depth around the lexical SQL check. Production users
-        should still supply credentials that have only SELECT/metadata grants.
+        Databricks SQL does not expose a read-only transaction through its
+        SQLAlchemy dialect, so least-privilege credentials remain mandatory.
         """
+        # Import locally to avoid a module cycle: tools only imports Database
+        # under TYPE_CHECKING. Keep this guard here so direct callers cannot
+        # bypass the workspace's identical allowlist.
+        from text2sql.tools import _is_read_only
+        if not _is_read_only(sql):
+            raise ValueError("Only read-only SQL statements are allowed")
+
         with self.engine.connect() as conn:
             dialect = self.dialect
             sqlite_guard = dialect == "sqlite"

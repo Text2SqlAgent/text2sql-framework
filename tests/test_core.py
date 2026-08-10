@@ -293,3 +293,9 @@ class TestDialects:
     def test_unknown_fallback(self):
         guide = get_dialect_guide("some_exotic_db")
         assert "information_schema" in guide
+
+
+def test_execute_read_only_enforces_lexical_guard_directly(tmp_path):
+    db = Database(f"sqlite:///{tmp_path / 'guard.db'}")
+    with pytest.raises(ValueError, match="read-only"):
+        db.execute_read_only("CREATE TABLE forbidden (id INTEGER)")
