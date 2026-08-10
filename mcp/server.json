@@ -46,6 +46,13 @@
           "isSecret": true
         },
         {
+          "name": "TEXT2SQL_TRACE_DATABASE_SCHEMA",
+          "description": "Postgres schema for trace tables (default text2sql)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
           "name": "TEXT2SQL_WORKSPACE_DIR",
           "description": "Local state directory (default .text2sql)",
           "isRequired": false,

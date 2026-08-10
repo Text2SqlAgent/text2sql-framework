@@ -38,6 +38,7 @@ class ExternalAgentSession:
         trace_mode: str = "local",
         trace_file: str | Path | None = None,
         trace_database_url: str | None = None,
+        trace_database_schema: str | None = None,
         examples: str | None = None,
         instructions: str | None = None,
     ):
@@ -66,16 +67,24 @@ class ExternalAgentSession:
 
         output_path = None
         trace_db = None
+        database_schema = None
         if trace_mode == "local":
             output_path = str(trace_file or ((workspace_path or Path(".text2sql")) / "traces.jsonl"))
         elif trace_mode == "database":
             if trace_database_url:
                 self.trace_db = Database(trace_database_url)
                 trace_db = self.trace_db
+                if self.trace_db.dialect == "postgresql":
+                    database_schema = trace_database_schema or "text2sql"
+                elif trace_database_schema:
+                    raise ValueError("trace_database_schema is supported only for PostgreSQL")
             else:
                 trace_db = self.db
+                database_schema = trace_database_schema
 
-        self.tracer = Tracer(output_path=output_path, db=trace_db) if trace_mode != "off" else None
+        self.tracer = Tracer(
+            output_path=output_path, db=trace_db, database_schema=database_schema
+        ) if trace_mode != "off" else None
         example_store = ExampleStore(examples) if examples else None
         self.workspace = PythonWorkspace(
             self.db,

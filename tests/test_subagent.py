@@ -3,6 +3,7 @@ import json
 from sqlalchemy import create_engine, text
 
 from text2sql.subagent import ExternalAgentSession
+from text2sql.tracing import Tracer
 
 
 def _database(tmp_path):
@@ -141,3 +142,33 @@ def test_databricks_rejects_source_database_trace_sink(tmp_path):
             workspace_dir=tmp_path,
             trace_mode="database",
         )
+
+
+def test_postgres_trace_sink_creates_and_qualifies_schema():
+    statements = []
+
+    class Connection:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def execute(self, statement, params=None):
+            statements.append((str(statement), params))
+
+    class Engine:
+        def begin(self):
+            return Connection()
+
+    class PostgresDatabase:
+        dialect = "postgresql"
+        engine = Engine()
+
+    tracer = Tracer(db=PostgresDatabase(), database_schema="text2sql")
+    tracer.start_query("question")
+    tracer.end_query("SELECT 1", True)
+
+    sql = "\n".join(statement for statement, _ in statements)
+    assert 'CREATE SCHEMA IF NOT EXISTS "text2sql"' in sql
+    assert 'CREATE TABLE IF NOT EXISTS "text2sql"."text2sql_traces"' in sql
+    assert 'CREATE TABLE IF NOT EXISTS "text2sql"."text2sql_tool_calls"' in sql
+    assert 'INSERT INTO "text2sql"."text2sql_traces"' in sql

@@ -118,6 +118,7 @@ def scaffold_claude_code(
     }
     if trace_mode == "database" and trace_database_type == "postgres":
         env["TEXT2SQL_TRACE_DATABASE_URL"] = "${TEXT2SQL_TRACE_DATABASE_URL}"
+        env["TEXT2SQL_TRACE_DATABASE_SCHEMA"] = "text2sql"
     server = {"command": mcp_command, "args": args, "env": env}
     existing = servers.get("text2sql")
     if existing is not None and existing != server and not force:

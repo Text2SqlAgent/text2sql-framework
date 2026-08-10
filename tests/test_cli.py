@@ -104,4 +104,5 @@ def test_databricks_with_postgres_trace_database(tmp_path):
         "--from", "text2sql-mcp[databricks,postgres]>=0.2.0", "text2sql-mcp"
     ]
     assert server["env"]["TEXT2SQL_TRACE_DATABASE_URL"] == "${TEXT2SQL_TRACE_DATABASE_URL}"
+    assert server["env"]["TEXT2SQL_TRACE_DATABASE_SCHEMA"] == "text2sql"
     assert "TEXT2SQL_TRACE_DATABASE_URL" in result.output

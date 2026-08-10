@@ -100,12 +100,16 @@ Or use a separate trace database:
 
 ```json
 "TEXT2SQL_TRACE_MODE": "database",
-"TEXT2SQL_TRACE_DATABASE_URL": "postgresql://.../agent_observability"
+"TEXT2SQL_TRACE_DATABASE_URL": "postgresql://.../agent_observability",
+"TEXT2SQL_TRACE_DATABASE_SCHEMA": "text2sql"
 ```
 
-Database tracing requires permission to create and insert into
-`text2sql_traces` and `text2sql_tool_calls`. Prefer read-only database credentials
-plus local or separate trace storage in production.
+For a separate Postgres sink, the schema defaults to `text2sql`. On first trace,
+the framework issues `CREATE SCHEMA IF NOT EXISTS "text2sql"`, then creates
+`text2sql.text2sql_traces` and `text2sql.text2sql_tool_calls`. The trace role
+therefore needs database `CREATE` for automatic bootstrap, or a DBA can precreate
+the schema and grant the role `USAGE`, `CREATE`, `SELECT`, and `INSERT` within it.
+Prefer read-only datasource credentials plus local or separate trace storage.
 
 ## Environment
 
@@ -115,6 +119,7 @@ plus local or separate trace storage in production.
 | `TEXT2SQL_TRACE_MODE` | `local` | `local`, `database`, or `off` |
 | `TEXT2SQL_TRACE_FILE` | `.text2sql/traces.jsonl` | Local JSONL path |
 | `TEXT2SQL_TRACE_DATABASE_URL` | source DB | Optional separate DB trace sink |
+| `TEXT2SQL_TRACE_DATABASE_SCHEMA` | `text2sql` for separate Postgres | Trace table schema |
 | `TEXT2SQL_WORKSPACE_DIR` | `.text2sql` | Local skills/state directory |
 | `TEXT2SQL_INSTRUCTIONS` | empty | Optional business guidance returned at query start |
 | `TEXT2SQL_EXAMPLES` | empty | Optional scenarios file |

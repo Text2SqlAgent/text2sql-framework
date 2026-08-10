@@ -286,7 +286,7 @@ def _extract_columns_from_result(result_preview):
 # ---------------------------------------------------------------------------
 
 _CREATE_TRACES_TABLE = """
-CREATE TABLE IF NOT EXISTS text2sql_traces (
+CREATE TABLE IF NOT EXISTS {traces_table} (
     id VARCHAR(36) NOT NULL PRIMARY KEY,
     question TEXT,
     final_sql TEXT,
@@ -306,7 +306,7 @@ CREATE TABLE IF NOT EXISTS text2sql_traces (
 """
 
 _CREATE_TOOL_CALLS_TABLE = """
-CREATE TABLE IF NOT EXISTS text2sql_tool_calls (
+CREATE TABLE IF NOT EXISTS {tool_calls_table} (
     id VARCHAR(36) NOT NULL PRIMARY KEY,
     trace_id VARCHAR(36),
     sequence INTEGER,
@@ -323,11 +323,11 @@ CREATE TABLE IF NOT EXISTS text2sql_tool_calls (
 # non-fatal — the index is a lookup optimization, not a correctness need.
 _CREATE_TOOL_CALLS_INDEX = (
     "CREATE INDEX IF NOT EXISTS idx_text2sql_tool_calls_trace_id "
-    "ON text2sql_tool_calls (trace_id)"
+    "ON {tool_calls_table} (trace_id)"
 )
 
 _INSERT_TRACE = """
-INSERT INTO text2sql_traces (
+INSERT INTO {traces_table} (
     id, question, final_sql, success, error, duration_seconds,
     total_tool_calls, sql_attempts, sql_errors, schema_queries,
     schema_backtracking_count, llm_iterations, input_tokens, output_tokens,
@@ -341,7 +341,7 @@ INSERT INTO text2sql_traces (
 """
 
 _INSERT_TOOL_CALL = """
-INSERT INTO text2sql_tool_calls (
+INSERT INTO {tool_calls_table} (
     id, trace_id, sequence, name, arguments, result,
     execution_ms, llm_think_ms, created_at
 ) VALUES (
@@ -367,8 +367,8 @@ class Tracer:
     combinable — enabling one never disables another.
     """
 
-    def __init__(self, output_path=None, api_key=None, api_url=None, batch_size=5, db=None):
-        # type: (Optional[str], Optional[str], Optional[str], int, Optional[Database]) -> None
+    def __init__(self, output_path=None, api_key=None, api_url=None, batch_size=5, db=None, database_schema=None):
+        # type: (Optional[str], Optional[str], Optional[str], int, Optional[Database], Optional[str]) -> None
         self.traces = []  # type: List[QueryTrace]
         self.output_path = Path(output_path) if output_path else None
         self._file_enabled = self.output_path is not None
@@ -387,6 +387,9 @@ class Tracer:
         self._db = db
         self._db_enabled = db is not None
         self._db_tables_ready = False
+        if database_schema is not None and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,62}", database_schema):
+            raise ValueError("database_schema must be a valid unquoted SQL identifier")
+        self._database_schema = database_schema
 
         # Timing state for per-step latency tracking
         self._last_event_time = 0.0  # when the last tool result came back (or query started)
@@ -596,6 +599,19 @@ class Tracer:
             )
         self._db_enabled = False
 
+    def _table_name(self, name):
+        # type: (str) -> str
+        if self._database_schema:
+            return f'"{self._database_schema}"."{name}"'
+        return name
+
+    def _database_sql(self, template):
+        # type: (str) -> str
+        return template.format(
+            traces_table=self._table_name("text2sql_traces"),
+            tool_calls_table=self._table_name("text2sql_tool_calls"),
+        )
+
     def _ensure_db_tables(self):
         # type: () -> bool
         """Create the trace tables on first write. Idempotent."""
@@ -607,15 +623,19 @@ class Tracer:
         try:
             # .begin() (not .connect()) — DDL/DML needs a committed transaction.
             with self._db.engine.begin() as conn:
-                conn.execute(_sql_text(_CREATE_TRACES_TABLE))
-                conn.execute(_sql_text(_CREATE_TOOL_CALLS_TABLE))
+                if self._database_schema:
+                    if self._db.dialect != "postgresql":
+                        raise ValueError("database_schema is currently supported only for PostgreSQL")
+                    conn.execute(_sql_text(f'CREATE SCHEMA IF NOT EXISTS "{self._database_schema}"'))
+                conn.execute(_sql_text(self._database_sql(_CREATE_TRACES_TABLE)))
+                conn.execute(_sql_text(self._database_sql(_CREATE_TOOL_CALLS_TABLE)))
         except Exception as exc:
             self._disable_db_tracing("could not create trace tables", exc)
             return False
 
         try:
             with self._db.engine.begin() as conn:
-                conn.execute(_sql_text(_CREATE_TOOL_CALLS_INDEX))
+                conn.execute(_sql_text(self._database_sql(_CREATE_TOOL_CALLS_INDEX)))
         except Exception as exc:
             logger.debug("Could not create trace_id index (non-fatal): %s", exc)
 
@@ -633,7 +653,7 @@ class Tracer:
 
         try:
             with self._db.engine.begin() as conn:
-                conn.execute(_sql_text(_INSERT_TRACE), {
+                conn.execute(_sql_text(self._database_sql(_INSERT_TRACE)), {
                     "id": trace_id,
                     "question": trace.question,
                     "final_sql": trace.final_sql,
@@ -656,7 +676,7 @@ class Tracer:
                         arguments = json.dumps(tc.arguments, default=str)
                     except (TypeError, ValueError):
                         arguments = str(tc.arguments)
-                    conn.execute(_sql_text(_INSERT_TOOL_CALL), {
+                    conn.execute(_sql_text(self._database_sql(_INSERT_TOOL_CALL)), {
                         "id": str(uuid.uuid4()),
                         "trace_id": trace_id,
                         "sequence": i,
@@ -758,14 +778,15 @@ class Tracer:
                         "SELECT id, question, final_sql, success, error, duration_seconds, "
                         "total_tool_calls, sql_attempts, sql_errors, schema_queries, "
                         "schema_backtracking_count, llm_iterations, input_tokens, output_tokens, created_at "
-                        "FROM text2sql_traces ORDER BY created_at DESC"
+                        f"FROM {self._table_name('text2sql_traces')} ORDER BY created_at DESC"
                     )).mappings().fetchmany(limit)
                     records = []
                     for row in reversed(rows):
                         record = dict(row)
                         calls = conn.execute(_sql_text(
                             "SELECT sequence, name, arguments, result, execution_ms, llm_think_ms, created_at "
-                            "FROM text2sql_tool_calls WHERE trace_id = :trace_id ORDER BY sequence"
+                            f"FROM {self._table_name('text2sql_tool_calls')} "
+                            "WHERE trace_id = :trace_id ORDER BY sequence"
                         ), {"trace_id": record["id"]}).mappings().all()
                         tool_calls = []
                         for call in calls:

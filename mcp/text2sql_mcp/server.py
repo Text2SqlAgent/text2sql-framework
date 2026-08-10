@@ -50,6 +50,7 @@ def _new_session():
         trace_mode=trace_mode,
         trace_file=os.environ.get("TEXT2SQL_TRACE_FILE") or None,
         trace_database_url=os.environ.get("TEXT2SQL_TRACE_DATABASE_URL") or None,
+        trace_database_schema=os.environ.get("TEXT2SQL_TRACE_DATABASE_SCHEMA") or None,
         examples=os.environ.get("TEXT2SQL_EXAMPLES") or None,
         instructions=os.environ.get("TEXT2SQL_INSTRUCTIONS") or None,
     )
