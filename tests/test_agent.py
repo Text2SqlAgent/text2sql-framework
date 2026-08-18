@@ -610,15 +610,47 @@ class TestDatabaseTracing:
         assert len(rows) == 2
         assert all(r["n"] == 2 for r in rows)
 
-    def test_disabled_by_default(self, sample_db_path):
-        from text2sql import TextSQL
+    def test_local_jsonl_by_default_and_explicitly_disabled(
+        self, sample_db_path, tmp_path, monkeypatch
+    ):
+        from text2sql import TextSQL, Tracer
 
+        monkeypatch.chdir(tmp_path)
         patcher, _ = _patch_anthropic([])
         with patcher:
             engine = TextSQL("sqlite:///{}".format(sample_db_path))
-        assert engine.tracer is None
+            disabled = TextSQL(
+                "sqlite:///{}".format(sample_db_path), trace_mode="off"
+            )
+        assert str(engine.tracer.output_path) == ".text2sql/traces.jsonl"
+        assert disabled.tracer is None
+        engine.tracer.start_query("local trace")
+        trace = engine.tracer.end_query("SELECT 1", success=True)
+        stored = Tracer.load_traces(".text2sql/traces.jsonl")
+        assert stored[0].trace_id == trace.trace_id
         names = engine.db.execute("SELECT name FROM sqlite_master WHERE type='table'")
         assert not any(n["name"].startswith("text2sql_") for n in names)
+
+    def test_separate_trace_database_takes_precedence(self, sample_db_path, tmp_path):
+        from text2sql import TextSQL
+
+        trace_database_path = tmp_path / "control-plane.db"
+        patcher, _ = _patch_anthropic([])
+        with patcher:
+            engine = TextSQL(
+                "sqlite:///{}".format(sample_db_path),
+                trace_database_url=f"sqlite:///{trace_database_path}",
+            )
+        engine.tracer.start_query("separate database")
+        trace = engine.tracer.end_query("SELECT 1", success=True)
+
+        rows = engine.trace_db.execute("SELECT id FROM text2sql_traces")
+        assert rows == [{"id": trace.trace_id}]
+        source_tables = engine.db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+        assert not any(row["name"].startswith("text2sql_") for row in source_tables)
+        assert engine.tracer.output_path is None
 
     def test_write_failure_disables_db_tracing_without_raising(self, sample_db_path, caplog):
         """A read-only role (or any DB error) must degrade, never break .ask()."""

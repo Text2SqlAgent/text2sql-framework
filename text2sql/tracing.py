@@ -84,6 +84,7 @@ class QueryTrace:
     question: str
     final_sql: str
     success: bool
+    trace_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     error: Optional[str] = None
 
     # Timing
@@ -616,7 +617,7 @@ class Tracer:
         if not self._ensure_db_tables():
             return
 
-        trace_id = str(uuid.uuid4())
+        trace_id = trace.trace_id
         created_at = _utc_now_iso()
 
         try:
@@ -713,13 +714,22 @@ class Tracer:
         p = Path(path)
         if not p.exists():
             return traces
-        with open(p) as f:
-            for line in f:
+        with open(p, encoding="utf-8") as f:
+            for line_number, line in enumerate(f, 1):
                 line = line.strip()
                 if not line:
                     continue
-                data = json.loads(line)
-                trace = _dict_to_query_trace(data)
+                try:
+                    data = json.loads(line)
+                    trace = _dict_to_query_trace(data)
+                except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                    logger.warning(
+                        "Skipping malformed trace line %s in %s: %s",
+                        line_number,
+                        p,
+                        exc,
+                    )
+                    continue
                 traces.append(trace)
         return traces
 
@@ -805,6 +815,13 @@ def _count_backtracking(tool_calls):
 def _dict_to_query_trace(data):
     # type: (dict) -> QueryTrace
     """Reconstruct a QueryTrace from a dict (loaded from JSONL)."""
+    data = dict(data)
+    # Old JSONL records predate trace_id. Derive a deterministic identifier so
+    # evidence references remain stable across repeated reads.
+    legacy_trace_id = str(uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        json.dumps(data, sort_keys=True, default=str, ensure_ascii=False),
+    ))
     tool_calls = [
         ToolCallTrace(**tc) for tc in data.pop("tool_calls", [])
     ]
@@ -828,6 +845,7 @@ def _dict_to_query_trace(data):
         question=data.get("question", ""),
         final_sql=data.get("final_sql", ""),
         success=data.get("success", False),
+        trace_id=data.get("trace_id") or legacy_trace_id,
         error=data.get("error"),
         start_time=data.get("start_time", 0),
         end_time=data.get("end_time", 0),

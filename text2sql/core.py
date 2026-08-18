@@ -46,6 +46,9 @@ class TextSQL:
             trace_to_db=True,
         )
 
+    Traces default to ``.text2sql/traces.jsonl``. Disable persistence explicitly:
+        engine = TextSQL("sqlite:///mydb.db", trace_mode="off")
+
     Analyze traces for schema and example recommendations:
         report = engine.analyze()
         for rec in report.schema_recommendations:
@@ -64,21 +67,39 @@ class TextSQL:
         api_url: str | None = None,
         agent_backend: str = "native",
         trace_to_db: bool = False,
+        trace_mode: str = "auto",
+        trace_database_url: str | None = None,
     ):
+        if trace_mode not in {"auto", "local", "database", "off"}:
+            raise ValueError("trace_mode must be 'auto', 'local', 'database', or 'off'")
+        if trace_mode == "off" and (
+            trace_file or trace_to_db or trace_database_url or api_key
+        ):
+            raise ValueError("trace_mode='off' cannot be combined with a trace sink")
         self.db = Database(connection_string)
+        self.trace_db = Database(trace_database_url) if trace_database_url else None
 
         self.example_store = None
         if examples:
             self.example_store = ExampleStore(examples)
 
-        # Enable tracing if trace_file, api_key or trace_to_db is set.
-        # The sinks are independent — any combination is valid.
-        if trace_file or api_key or trace_to_db:
+        # With no explicit database sink, traces default to local JSONL. Passing
+        # an explicit trace_file together with database mode enables both sinks.
+        resolved_db = self.trace_db
+        if resolved_db is None and (trace_to_db or trace_mode == "database"):
+            resolved_db = self.db
+        resolved_trace_file = trace_file
+        if resolved_trace_file is None and (
+            trace_mode == "local" or (trace_mode == "auto" and resolved_db is None)
+        ):
+            resolved_trace_file = ".text2sql/traces.jsonl"
+
+        if trace_mode != "off" and (resolved_trace_file or api_key or resolved_db):
             self.tracer = Tracer(
-                output_path=trace_file,
+                output_path=resolved_trace_file,
                 api_key=api_key,
                 api_url=api_url,
-                db=self.db if trace_to_db else None,
+                db=resolved_db,
             )
         else:
             self.tracer = None
