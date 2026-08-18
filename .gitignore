@@ -24,6 +24,7 @@ venv/
 .ruff_cache/
 
 # Traces
+.text2sql/
 *.traces.jsonl
 traces_*.jsonl
 traces/

@@ -38,6 +38,10 @@ Set environment variables in your MCP client config:
 | `TEXT2SQL_MODEL` | no | LangChain model id (default: `anthropic:claude-sonnet-4-6`) |
 | `TEXT2SQL_INSTRUCTIONS` | no | Business rules / hints, e.g. "Revenue = net of refunds." |
 | `TEXT2SQL_EXAMPLES` | no | Path to a scenarios.md file for the agent's `lookup_example` tool |
+| `TEXT2SQL_TRACE_MODE` | no | `local` (default), `database`, or `off` |
+| `TEXT2SQL_TRACE_FILE` | no | Local JSONL path; defaults to `.text2sql/traces.jsonl` |
+| `TEXT2SQL_TRACE_TO_DB` | no | Write and read traces from the source database's two trace tables |
+| `TEXT2SQL_TRACE_DATABASE_URL` | no | Write and read traces in a separate trace database; credentials are never returned by MCP |
 
 ### Claude Desktop / Cursor / generic MCP
 
@@ -69,6 +73,12 @@ goose configure
 ## Tools
 
 - **`query(question, max_rows=100)`** — ask the database a natural-language question. Returns `{sql, data, error, row_count, tool_calls_made}`.
+- **`trace_source()`** — report whether traces come from JSONL or the `text2sql_traces` / `text2sql_tool_calls` tables.
+- **`recent_traces(limit=20, failures_only=false)`** — return recent completed investigations with ordered tool calls.
+- **`trace_summary(limit=100)`** — aggregate success, token, SQL-error, schema-query, and tool-call signals.
+
+The trace tools do not construct an LLM client, so Claude Code, Codex, Cursor,
+or another MCP host can perform the improvement analysis with its own model.
 
 ## How it works
 

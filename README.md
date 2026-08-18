@@ -205,6 +205,32 @@ The MCP server plugs into Claude Code, Cursor, or any MCP-compatible assistant a
 
 The loop: run queries → traces accumulate → call `analyze_traces` → scenarios.md gets better → future queries use the improved scenarios via `lookup_example`. This is how we went from 96% to 100% on Spider — the MCP identified a LEFT vs INNER JOIN pattern the agent kept getting wrong and wrote a corrective scenario that fixed it.
 
+### Improve from traces with any coding agent
+
+Install the evidence-driven improvement skill into the skill directory used by
+your coding agent:
+
+```bash
+text2sql install-improvement-skill .agents/skills
+```
+
+The same canonical skill can be installed into Claude Code, Codex, Cursor, or
+another tool's skill directory. It discovers whether traces live in a local
+JSONL file or in the `text2sql_traces` and `text2sql_tool_calls` tables through
+the MCP trace tools.
+
+Tracing defaults to `.text2sql/traces.jsonl`. Database tracing takes precedence
+when `trace_to_db=True` or `trace_mode="database"`; passing an explicit
+`trace_file` as well enables both sinks. Use `trace_mode="off"` to disable trace
+persistence.
+
+The improvement workflow looks for repeated correctness or efficiency problems,
+keeps the system prompt to a high-level database map, places specialized
+guidance in selectively loaded skills, and ignores inexpensive one-off errors
+that the SQL agent corrected successfully. When it makes a change, it reviews
+relevant Git history and records non-sensitive trace or evaluation IDs in the
+commit body.
+
 ## CLI
 
 ```bash

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sys
+from importlib.resources import files
+from pathlib import Path
 
 import click
 from rich.console import Console
@@ -20,6 +22,24 @@ console = Console()
 def main():
     """text2sql - Ask your database questions in plain English."""
     pass
+
+
+@main.command("install-improvement-skill")
+@click.argument("target", type=click.Path(file_okay=False, path_type=Path))
+@click.option("--force", is_flag=True, help="Replace an existing skill file")
+def install_improvement_skill(target, force):
+    """Install the host-agnostic improvement skill under TARGET."""
+    destination = target / "improve-text2sql" / "SKILL.md"
+    if destination.exists() and not force:
+        raise click.ClickException(f"{destination} already exists; use --force to replace it")
+    content = (
+        files("text2sql")
+        .joinpath("skills", "improve-text2sql", "SKILL.md")
+        .read_text(encoding="utf-8")
+    )
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(content, encoding="utf-8")
+    console.print(f"[green]Installed:[/green] {destination}")
 
 
 @main.command()
