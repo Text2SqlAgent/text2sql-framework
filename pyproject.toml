@@ -30,6 +30,7 @@ dependencies = [
     "click>=8.0",
     "rich>=13.0",
     "pydantic>=2.0",
+    "sqlglot>=30.0,<31.0",
 ]
 
 [project.optional-dependencies]

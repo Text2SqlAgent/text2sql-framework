@@ -139,6 +139,15 @@ class TestReadOnly:
     def test_select_allowed(self):
         assert _is_read_only("SELECT * FROM foo")
 
+    def test_keyword_in_string_literal_allowed(self):
+        assert _is_read_only("SELECT 'DELETE' AS action")
+
+    def test_keyword_as_identifier_allowed(self):
+        assert _is_read_only("SELECT call FROM phone_log")
+
+    def test_unparseable_sql_with_write_keyword_fails_closed(self):
+        assert not _is_read_only("SELECT * FROM (DELETE")
+
     def test_with_allowed(self):
         assert _is_read_only("WITH cte AS (SELECT 1) SELECT * FROM cte")
 
