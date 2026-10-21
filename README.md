@@ -224,6 +224,8 @@ when `trace_to_db=True` or `trace_mode="database"`; passing an explicit
 `trace_file` as well enables both sinks. Use `trace_mode="off"` to disable trace
 persistence.
 
+To read a local JSONL trace file, run [`examples/parse_traces.py`](examples/parse_traces.py) from the repo root. It defaults to `traces.jsonl` and prints each trace with its SQL, tool results, and reasoning. `--summary` prints one line per trace, `-n` selects one trace, and `--json` pretty-prints the raw record. The script uses only the Python standard library.
+
 The improvement workflow looks for repeated correctness or efficiency problems,
 keeps the system prompt to a high-level database map, places specialized
 guidance in selectively loaded skills, and ignores inexpensive one-off errors
